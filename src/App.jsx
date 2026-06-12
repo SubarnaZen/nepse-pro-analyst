@@ -5,6 +5,12 @@ import SectorPanel from './components/SectorPanel';
 import ImportantSites from './components/ImportantSites';
 import Watchlist from './components/Watchlist';
 
+import Screener from './components/Screener';
+import MarketNews from './components/MarketNews';
+import IPOTracker from './components/IPOTracker';
+import PortfolioTracker from './components/PortfolioTracker';
+import Alerts from './components/Alerts';
+
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedTicker, setSelectedTicker] = useState(null);
@@ -38,6 +44,16 @@ function App() {
             <SectorPanel selectedTicker={selectedTicker} onSelectTicker={setSelectedTicker} />
           </>
         );
+      case 'screener':
+        return <Screener onSelectTicker={setSelectedTicker} setActiveTab={setActiveTab} />;
+      case 'news':
+        return <MarketNews />;
+      case 'ipo':
+        return <IPOTracker />;
+      case 'portfolio':
+        return <PortfolioTracker />;
+      case 'alerts':
+        return <Alerts />;
       case 'sites':
         return <ImportantSites />;
       case 'watchlist':
