@@ -1,0 +1,138 @@
+.main-content-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-dark);
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.empty-icon {
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.main-content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.chart-section, .analysis-section {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-panel);
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-section {
+  flex: 1.5;
+  min-height: 400px;
+}
+
+.analysis-section {
+  flex: 1;
+  min-height: 250px;
+}
+
+.section-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.section-header h3 {
+  font-size: 1rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-link {
+  color: var(--accent-teal);
+  text-decoration: none;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+}
+
+.chart-container {
+  flex: 1;
+  width: 100%;
+  background-color: #000;
+}
+
+.nepse-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.analysis-output {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  background-color: var(--bg-dark);
+}
+
+.analysis-text {
+  white-space: pre-wrap;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.placeholder-state {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 32px;
+}
+
+.loading-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-teal);
+  gap: 16px;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(0, 212, 170, 0.2);
+  border-top-color: var(--accent-teal);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

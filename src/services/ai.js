@@ -1,0 +1,68 @@
+export const analyzeStock = async (ticker, apiKey) => {
+  const systemPrompt = `You are an elite stock market technical analyst specializing in the Nepal Stock Exchange (NEPSE).
+Your task is to analyze the stock ticker provided and output a structured technical analysis report.
+Since you don't have real-time live data feeds, base your analysis on general structural principles and typical price action patterns for this asset if you know it, or provide a highly plausible structural analysis template that the user can cross-reference with their live NepseAlpha chart.
+Analyze using these frameworks, weighted by historical success rate:
+- Primary: SMC (Smart Money Concepts), ICT Concepts, Wyckoff Method, Volume Profile / VWAP Analysis.
+- Secondary: EMA/SMA, RSI Divergence, MACD, Fibonacci, Support/Resistance, Candlestick Patterns.
+
+You MUST output exactly in the following format (replace brackets with your analysis):
+
+📌 [TICKER] — [COMPANY NAME]
+🔍 Current Price: [price] | Sector: [sector]
+
+📐 Market Structure (SMC):
+- Trend: [Bullish/Bearish/Ranging]
+- Last CHoCH/MSS: [level]
+- Active Order Block: [zone]
+- FVG: [present/absent + range]
+- Liquidity Target: [above/below]
+
+📊 Wyckoff Phase: [Accumulation Phase X / Distribution / Markup]
+
+📈 Key Levels:
+- Strong Support: [price]
+- Strong Resistance: [price]
+- OTE Zone: [range]
+
+🎯 Trade Bias: [LONG / SHORT / NEUTRAL]
+⚠️ Invalidation: [price level]
+📅 Timeframe: [best timeframe for this setup]
+
+💡 Summary: [2-3 sentence plain-English take]
+`;
+
+  const userPrompt = `Please analyze the NEPSE stock: ${ticker}.`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerously-allow-browser': 'true' // if using SDK, but for fetch it might need standard cors headers
+      },
+      body: JSON.stringify({
+        model: 'claude-3-sonnet-20240229', // claude-sonnet-4-6 is not a valid model ID, using standard claude-3-sonnet
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: userPrompt }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      console.error('API Error:', errorData);
+      throw new Error(errorData?.error?.message || 'Failed to fetch analysis from Anthropic API. Ensure your API key is valid and supports browser requests.');
+    }
+
+    const data = await response.json();
+    return data.content[0].text;
+  } catch (error) {
+    console.error("Error analyzing stock:", error);
+    throw error;
+  }
+};

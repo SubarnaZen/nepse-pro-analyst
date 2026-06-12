@@ -1,0 +1,97 @@
+.sector-panel {
+  background-color: var(--bg-panel);
+  border-top: 1px solid var(--border-color);
+  padding: 16px;
+  overflow-x: auto;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.sectors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sector-card {
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+}
+
+.sector-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid transparent;
+  transition: background-color 0.2s;
+}
+
+.sector-header:hover {
+  background-color: var(--bg-hover);
+}
+
+.sector-header.active {
+  border-bottom-color: var(--border-color);
+  background-color: var(--bg-hover);
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--alert-amber);
+  box-shadow: 0 0 8px var(--alert-amber);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 166, 35, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(245, 166, 35, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 166, 35, 0); }
+}
+
+.sector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  padding: 16px;
+}
+
+.ticker-btn {
+  padding: 8px 4px;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-button);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  text-align: center;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.ticker-btn:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--accent-teal);
+}
+
+.ticker-btn.selected {
+  background-color: rgba(0, 212, 170, 0.15);
+  border-color: var(--accent-teal);
+  color: var(--accent-teal);
+  font-weight: 700;
+}
+
+.unlisted-badge {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  color: var(--signal-red);
+  font-size: 0.7rem;
+}
