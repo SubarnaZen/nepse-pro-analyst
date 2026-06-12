@@ -4,21 +4,21 @@ import { ExternalLink, Play, AlertCircle } from 'lucide-react';
 
 import { analyzeStock } from '../services/ai';
 
-export default function MainContent({ selectedTicker, apiKey }) {
+export default function MainContent({ selectedTicker, apiKey, provider }) {
   const [analysisResult, setAnalysisResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const handleAnalyze = async () => {
     if (!selectedTicker) return;
     if (!apiKey) {
-      alert("Please set your Anthropic API Key in Settings first.");
+      alert(`Please set your ${provider} API Key in Settings first.`);
       return;
     }
 
     setLoading(true);
     setAnalysisResult(null);
     try {
-      const result = await analyzeStock(selectedTicker, apiKey);
+      const result = await analyzeStock(selectedTicker, apiKey, provider);
       setAnalysisResult(result);
     } catch (error) {
       setAnalysisResult(`Error: ${error.message}`);
