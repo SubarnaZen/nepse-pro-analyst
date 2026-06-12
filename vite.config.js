@@ -8,5 +8,5 @@ export default defineConfig({
     outDir: 'docs',
     emptyOutDir: true
   },
-  base: './' // ensures relative paths for assets on github pages
+  base: '/nepse-pro-analyst/'
 })
