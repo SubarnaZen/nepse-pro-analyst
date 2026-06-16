@@ -10,6 +10,7 @@ import MarketNews from './components/MarketNews';
 import IPOTracker from './components/IPOTracker';
 import PortfolioTracker from './components/PortfolioTracker';
 import Alerts from './components/Alerts';
+import ZenChart from './components/ZenChart';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -44,6 +45,8 @@ function App() {
             <SectorPanel selectedTicker={selectedTicker} onSelectTicker={setSelectedTicker} />
           </>
         );
+      case 'zenchart':
+        return <ZenChart initialTicker={selectedTicker || 'NABIL'} />;
       case 'screener':
         return <Screener onSelectTicker={setSelectedTicker} setActiveTab={setActiveTab} />;
       case 'news':
