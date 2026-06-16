@@ -10,21 +10,23 @@ import {
   Globe, 
   Settings, 
   History,
-  Menu
+  Menu,
+  Zap
 } from 'lucide-react';
 import './LeftSidebar.css';
 
 const navItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'watchlist', label: 'Watchlist', icon: Star },
-  { id: 'screener', label: 'Stock Screener', icon: Search },
-  { id: 'news', label: 'Market News', icon: Newspaper },
-  { id: 'ipo', label: 'IPO / FPO Tracker', icon: Calendar },
-  { id: 'portfolio', label: 'Portfolio Tracker', icon: Briefcase },
-  { id: 'alerts', label: 'Alerts', icon: Bell },
-  { id: 'sites', label: 'Important Sites', icon: Globe },
-  { id: 'history', label: 'Analysis History', icon: History },
-  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'dashboard',  label: 'Dashboard',       icon: LayoutDashboard },
+  { id: 'zenchart',   label: 'ZenChart ⚡',     icon: Zap },
+  { id: 'watchlist',  label: 'Watchlist',        icon: Star },
+  { id: 'screener',   label: 'Stock Screener',   icon: Search },
+  { id: 'news',       label: 'Market News',      icon: Newspaper },
+  { id: 'ipo',        label: 'IPO / FPO Tracker',icon: Calendar },
+  { id: 'portfolio',  label: 'Portfolio Tracker', icon: Briefcase },
+  { id: 'alerts',     label: 'Alerts',           icon: Bell },
+  { id: 'sites',      label: 'Important Sites',  icon: Globe },
+  { id: 'history',    label: 'Analysis History', icon: History },
+  { id: 'settings',   label: 'Settings',         icon: Settings },
 ];
 
 export default function LeftSidebar({ activeTab, setActiveTab }) {
