@@ -1,701 +1,349 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  TrendingUp, TrendingDown, Minus, RefreshCw, AlertTriangle,
-  Target, ShieldAlert, DollarSign, BarChart2, ChevronDown, Zap
-} from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { TrendingUp, TrendingDown, Minus, RefreshCw, ChevronLeft, Zap, BarChart2, ChevronDown } from 'lucide-react';
 
-// ─── NEPSE ticker list (reuse from SectorPanel) ───────────────────────────────
-const ALL_TICKERS = [
-  'ADBL','CZBIL','EBL','GBIME','HBL','KBL','MBL','NABIL','NBL','NICA','NIB','NMB','PCBL','PRVU','SBI','SANIMA','SCB','SRBL',
-  'CORBL','EDBL','GBBL','GRDBL','HAMRO','JBBL','KSBBL','LBBL','MDB','MNBBL','MSLB','NABBC','NGBL','SADBL','SAPDBL','SHINE','SINDU',
-  'CFCL','GFCL','GUFL','ICFC','JFL','MFIL','NFS','PFL','PROFL','RLFL','SFCL','SIFC',
-  'CLI','GLI','HLI','ILI','JLI','LIC','MLBSL','NLIC','PLI','PLIC','RNLI','SNLI',
-  'AIL','GILB','HGI','IGI','LGIL','MIC','NICL','NIL','NLG','PICL','PIC','PRIN','RBCL','SALICO','SGI','SICL','UAIL',
-  'AHPC','AKJCL','API','BARUN','BPCL','CHCL','DHPL','GHL','HDHPC','HURJA','KBSH','KPCL','KRBL','MBJC','MCHL','NHDL','NHPC','NWEDC','PMHPL','RADHI','RIDI','RHPC','RRHPCL','SHEL','SHPC','SHL','SJCL','SSHL','UMHL','UNHPL','UPPER','UPCL',
-  'BNL','BNT','BSL','CIT','GCIL','HDL','NKU','NTC','SHIVM','STML','CGH','OMHL','OHL','TRH','YHL',
-  'CHDC','HIDCL','NIFRA','NRN','SPDL','STC'
-].sort();
+// ─── ALL 227 NEPSE equity symbols from Merolagani ────────────────────────────
+const ALL_TICKERS = ["ADBL","CBL","CTBNL","CZBIL","EBL","GBIME","GRAND","HBL","JBNL","KBL","KIST","LBL","LUBL","MBL","MEGA","NABIL","NBB","NBL","NCCB","NIB","NICA","NMB","PCBL","SANIMA","SBI","SBL","SCB","SRBL","CFCL","CFL","CIT","CMB","CMBSL","EFL","FFCL","GFCL","GFL","GMFIL","HAMA","HFL","ICFC","IFIL","ILFC","JEFL","JFL","KAFIL","KFL","LFC","LFLC","MFIL","MFL","MPFL","NABB","NBSL","NCM","NDFL","NEFL","NFS","NHMF","NNFC","NSM","OFL","PFC","PFCL","PFCLL","PFIL","PFL","PFLBS","PRFL","PROFL","RIBSL","SETI","SFC","SFFIL","SFL","SIFC","SLFL","SMBF","SYFL","UFCL","UFIL","UFL","ZFL","OHL","SHL","TRH","YHL","AVU","BNL","BNT","BSL","BSM","FHL","GRU","HBT","HDL","JSM","NBBU","NKU","NLO","NVG","RJM","SBPP","SRS","UNL","NFD","NTC","AHPC","BPCL","CHCL","NHPC","SHPC","BBC","NTL","NWC","STC","AIC","ALICL","EIC","GLICL","HGI","LGIL","LICN","NBIL","NICL","NIL","NLG","NLIC","NLICL","PIC","PICL","PLIC","RBS","SIC","SICL","SIL","SLICL","UIC","ALDBL","APEX","ARDBL","AXIS","BBBL","BBBLN","BGDBL","BHBL","BLDBL","BRTBL","BSBL","BUDBL","CBBL","CDBL","CEDBL","CIVIC","CNDBL","CORBL","CSDBL","DDBL","EDBL","FMDBL","GABL","GBBL","GDBL","GDBNL","GSDBL","HAMRO","HBDL","IDBL","INDB","INDBL","JBBL","JHBL","KADBL","KBBL","KDBL","KEBL","KHDBL","KKBL","KMCDB","KNBL","KRBL","MBBL","MDB","MDBL","METRO","MGBL","MIDBL","MNBBL","MSBBL","MTBL","NABBC","NCDB","NCDBL","NDB","NDEP","NGBL","NIDC","NLBBL","NNLB","NUBL","PADBL","PBSL","PDB","PDBL","PGBBL","PGBL","PRBBL","PRDBL","PURBL","RDBL","RMDC","SADBL","SBBLJ","SDBL","SEWA","SHINE","SINDU","SKBBL","SLBBL","SMFDB","SUBBL","SUPRME","SWBBL","TBBL","VBBL","WDBL","YETI"];
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const toUnix = (daysAgo) => Math.floor((Date.now() - daysAgo * 86400000) / 1000);
-const fmt = (n) => n != null ? Number(n).toFixed(2) : '—';
+const fmt  = (n) => n != null ? Number(n).toFixed(2) : '—';
+const fmtK = (n) => n > 1e6 ? (n/1e6).toFixed(1)+'M' : n > 1e3 ? (n/1e3).toFixed(0)+'K' : String(Math.round(n||0));
 
-// ─── Technical indicator math ─────────────────────────────────────────────────
-function calcSMA(closes, period) {
-  const result = [];
-  for (let i = 0; i < closes.length; i++) {
-    if (i < period - 1) { result.push(null); continue; }
-    const slice = closes.slice(i - period + 1, i + 1);
-    result.push(slice.reduce((a, b) => a + b, 0) / period);
-  }
-  return result;
+// ─── Fetch real data from Merolagani ─────────────────────────────────────────
+async function fetchMerolagani(sym) {
+  try {
+    const res = await fetch(
+      `https://merolagani.com/handlers/webrequesthandler.ashx?type=get_company_graph&symbol=${sym}&dateRange=1`,
+      { mode: 'cors' }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.quotes || data.quotes.length < 20) return null;
+    return data.quotes.map(q => ({ date: q.date, open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume || 0 }));
+  } catch { return null; }
 }
 
-function calcEMA(closes, period) {
-  const k = 2 / (period + 1);
-  const result = [];
-  let ema = null;
-  for (let i = 0; i < closes.length; i++) {
-    if (ema === null) {
-      if (i < period - 1) { result.push(null); continue; }
-      ema = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    } else {
-      ema = closes[i] * k + ema * (1 - k);
-    }
-    result.push(ema);
-  }
-  return result;
-}
-
-function calcRSI(closes, period = 14) {
-  if (closes.length < period + 1) return closes.map(() => null);
-  const result = Array(period).fill(null);
-  let gains = 0, losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff >= 0) gains += diff; else losses -= diff;
-  }
-  let avgGain = gains / period, avgLoss = losses / period;
-  result.push(100 - 100 / (1 + (avgLoss === 0 ? Infinity : avgGain / avgLoss)));
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    avgGain = (avgGain * (period - 1) + Math.max(diff, 0)) / period;
-    avgLoss = (avgLoss * (period - 1) + Math.max(-diff, 0)) / period;
-    result.push(100 - 100 / (1 + (avgLoss === 0 ? Infinity : avgGain / avgLoss)));
-  }
-  return result;
-}
-
-function calcMACD(closes) {
-  const ema12 = calcEMA(closes, 12);
-  const ema26 = calcEMA(closes, 26);
-  const macdLine = ema12.map((v, i) => (v != null && ema26[i] != null) ? v - ema26[i] : null);
-  const validMacd = macdLine.filter(v => v != null);
-  const signalRaw = calcEMA(validMacd, 9);
-  const signal = Array(macdLine.length - validMacd.length).fill(null).concat(signalRaw);
-  const histogram = macdLine.map((v, i) => (v != null && signal[i] != null) ? v - signal[i] : null);
-  return { macdLine, signal, histogram };
-}
-
-function calcBollingerBands(closes, period = 20, stdDev = 2) {
-  const sma = calcSMA(closes, period);
-  return sma.map((mid, i) => {
-    if (mid == null) return { upper: null, mid: null, lower: null };
-    const slice = closes.slice(i - period + 1, i + 1);
-    const variance = slice.reduce((s, v) => s + Math.pow(v - mid, 2), 0) / period;
-    const sd = Math.sqrt(variance) * stdDev;
-    return { upper: mid + sd, mid, lower: mid - sd };
-  });
-}
-
-function calcATR(highs, lows, closes, period = 14) {
-  const trs = [null];
-  for (let i = 1; i < closes.length; i++) {
-    trs.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1])));
-  }
-  const atr = calcSMA(trs.slice(1), period);
-  return [null, ...atr];
-}
+// ─── Indicators ───────────────────────────────────────────────────────────────
+const calcSMA = (a,p) => a.map((_,i) => i<p-1?null:a.slice(i-p+1,i+1).reduce((s,v)=>s+v,0)/p);
+function calcEMA(a,p){const k=2/(p+1);let e=null;const o=[];for(let i=0;i<a.length;i++){if(e===null){if(i<p-1){o.push(null);continue;}e=a.slice(0,p).reduce((s,v)=>s+v,0)/p;}else e=a[i]*k+e*(1-k);o.push(e);}return o;}
+function calcRSI(c,p=14){if(c.length<p+1)return c.map(()=>null);const o=Array(p).fill(null);let g=0,l=0;for(let i=1;i<=p;i++){const d=c[i]-c[i-1];d>=0?g+=d:l-=d;}let ag=g/p,al=l/p;o.push(100-100/(1+(al===0?Infinity:ag/al)));for(let i=p+1;i<c.length;i++){const d=c[i]-c[i-1];ag=(ag*(p-1)+Math.max(d,0))/p;al=(al*(p-1)+Math.max(-d,0))/p;o.push(100-100/(1+(al===0?Infinity:ag/al)));}return o;}
+function calcMACD(c){const e12=calcEMA(c,12),e26=calcEMA(c,26);const ml=e12.map((v,i)=>v!=null&&e26[i]!=null?v-e26[i]:null);const vl=ml.filter(v=>v!=null);const sg=[...Array(ml.length-vl.length).fill(null),...calcEMA(vl,9)];return{ml,sg,hist:ml.map((v,i)=>v!=null&&sg[i]!=null?v-sg[i]:null)};}
+function calcATR(h,l,c,p=14){const t=[null];for(let i=1;i<c.length;i++)t.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));return[null,...calcSMA(t.slice(1),p)];}
+function calcBB(c,p=20,sd=2){return calcSMA(c,p).map((m,i)=>{if(m==null)return{u:null,m:null,l:null};const v=c.slice(i-p+1,i+1).reduce((s,x)=>s+Math.pow(x-m,2),0)/p;const d=Math.sqrt(v)*sd;return{u:m+d,m,l:m-d};});}
 
 // ─── Signal engine ────────────────────────────────────────────────────────────
-function generateSignal(candles) {
+function analyze(candles, sym) {
   if (!candles || candles.length < 30) return null;
-  const closes = candles.map(c => c.close);
-  const highs  = candles.map(c => c.high);
-  const lows   = candles.map(c => c.low);
+  const C=candles.map(c=>c.close),H=candles.map(c=>c.high),L=candles.map(c=>c.low),V=candles.map(c=>c.volume||0);
+  const n=candles.length-1;
+  const rsi=calcRSI(C),ema10=calcEMA(C,10),ema20=calcEMA(C,20),ema50=calcEMA(C,50);
+  const {ml,sg,hist}=calcMACD(C),bb=calcBB(C),atr=calcATR(H,L,C);
+  const price=C[n],prevClose=C[n-1],rsiV=rsi[n],e10=ema10[n],e20=ema20[n],e50=ema50[n];
+  const macd=ml[n],msig=sg[n],mhist=hist[n],mhistP=hist[n-1],bbV=bb[n];
+  const atrV=atr[n]||price*0.02;
+  const avgVol=V.slice(-20).reduce((a,b)=>a+b,0)/20,lastVol=V[n];
+  const resistance=Math.max(...H.slice(n-15,n)),support=Math.min(...L.slice(n-15,n));
+  const change=prevClose?((price-prevClose)/prevClose*100):0;
 
-  const rsi    = calcRSI(closes);
-  const ema20  = calcEMA(closes, 20);
-  const ema50  = calcEMA(closes, 50);
-  const { macdLine, signal: macdSignal, histogram } = calcMACD(closes);
-  const bb     = calcBollingerBands(closes);
-  const atr    = calcATR(highs, lows, closes);
+  let score=0,reasons=[];
+  if(e20&&e50){if(price>e20&&e20>e50){score+=2;reasons.push('Price > EMA20 > EMA50 — Bullish structure');}else if(price<e20&&e20<e50){score-=2;reasons.push('Price < EMA20 < EMA50 — Bearish structure');}else if(price>e50){score+=1;reasons.push('Price above EMA50');}else{score-=1;reasons.push('Price below EMA50');}}
+  if(rsiV!=null){if(rsiV<32){score+=2;reasons.push(`RSI ${fmt(rsiV)} — Oversold`);}else if(rsiV>70){score-=2;reasons.push(`RSI ${fmt(rsiV)} — Overbought`);}else if(rsiV>55){score+=1;reasons.push(`RSI ${fmt(rsiV)} — Bullish momentum`);}else if(rsiV<45){score-=1;reasons.push(`RSI ${fmt(rsiV)} — Bearish momentum`);}else reasons.push(`RSI ${fmt(rsiV)} — Neutral`);}
+  if(macd!=null&&msig!=null){if(macd>msig&&mhist>0&&mhistP!=null&&mhist>mhistP){score+=2;reasons.push('MACD bullish crossover + strengthening');}else if(macd>msig){score+=1;reasons.push('MACD above signal');}else if(macd<msig&&mhist<0&&mhistP!=null&&mhist<mhistP){score-=2;reasons.push('MACD bearish crossover + weakening');}else{score-=1;reasons.push('MACD below signal');}}
+  if(bbV.l!=null){if(price<=bbV.l){score+=2;reasons.push('Price at lower BB — oversold');}else if(price>=bbV.u){score-=2;reasons.push('Price at upper BB — overbought');}else if(price>bbV.m){score+=1;reasons.push('Price above BB midline');}else{score-=1;reasons.push('Price below BB midline');}}
+  if(lastVol>avgVol*1.5){score+=(score>0?1:-1);reasons.push('High volume confirms move');}
+  if(((price-support)/price)*100<2.5){score+=1;reasons.push(`Near support Rs ${fmt(support)}`);}
+  if(((resistance-price)/price)*100<2.5){score-=1;reasons.push(`Near resistance Rs ${fmt(resistance)}`);}
 
-  const last = candles.length - 1;
-  const price   = closes[last];
-  const rsiVal  = rsi[last];
-  const e20     = ema20[last];
-  const e50     = ema50[last];
-  const macd    = macdLine[last];
-  const sig     = macdSignal[last];
-  const hist    = histogram[last];
-  const histPrev = histogram[last - 1];
-  const bbLast  = bb[last];
-  const atrVal  = atr[last];
+  let action,color;
+  if(score>=3){action='BUY';color='#1a7a4a';}else if(score<=-3){action='SELL';color='#c0392b';}else{action='HOLD';color='#e67e22';}
 
-  // ── support / resistance from recent swing highs & lows ──
-  const window = 10;
-  const recentHighs = highs.slice(last - window, last);
-  const recentLows  = lows.slice(last - window, last);
-  const resistance  = Math.max(...recentHighs);
-  const support     = Math.min(...recentLows);
+  let marketStage='Consolidation';
+  if(e20&&e50){if(price>e10&&e10>e20&&e20>e50)marketStage='Mark-Up (Uptrend)';else if(price<e10&&e10<e20&&e20<e50)marketStage='Mark-Down (Downtrend)';else if(price>e50&&e20>e50)marketStage='Re-Accumulation';else if(price<e50&&e20<e50)marketStage='Re-Distribution';else if(rsiV&&rsiV<35&&price<e50)marketStage='Accumulation';else if(rsiV&&rsiV>65&&price>e50)marketStage='Distribution';}
 
-  // ── scoring ──
-  let score = 0;
-  const reasons = [];
+  const demandLow=support-atrV*0.3,demandHigh=support+atrV*0.5;
+  const supplyLow=resistance-atrV*0.5,supplyHigh=resistance+atrV*0.3;
+  const buyZoneLow=Math.max(demandLow,price-atrV*1.2),buyZoneHigh=Math.min(demandHigh,price+atrV*0.3);
+  const stopLoss=action==='SELL'?price+atrV*1.5:support-atrV*0.5;
+  const target1=action==='SELL'?price-atrV*2:resistance;
+  const target2=action==='SELL'?price-atrV*3.5:resistance+atrV*2;
+  const rr=Math.abs(target1-price)/Math.abs(stopLoss-price);
 
-  // EMA trend
-  if (e20 != null && e50 != null) {
-    if (price > e20 && e20 > e50)  { score += 2; reasons.push('Price > EMA20 > EMA50 (Bullish trend)'); }
-    else if (price < e20 && e20 < e50) { score -= 2; reasons.push('Price < EMA20 < EMA50 (Bearish trend)'); }
-    else if (price > e50) { score += 1; reasons.push('Price above EMA50'); }
-    else { score -= 1; reasons.push('Price below EMA50'); }
-  }
-
-  // RSI
-  if (rsiVal != null) {
-    if (rsiVal < 35)        { score += 2; reasons.push(`RSI ${fmt(rsiVal)} — Oversold zone (potential bounce)`); }
-    else if (rsiVal > 68)   { score -= 2; reasons.push(`RSI ${fmt(rsiVal)} — Overbought zone (potential pullback)`); }
-    else if (rsiVal > 55)   { score += 1; reasons.push(`RSI ${fmt(rsiVal)} — Bullish momentum`); }
-    else if (rsiVal < 45)   { score -= 1; reasons.push(`RSI ${fmt(rsiVal)} — Bearish momentum`); }
-    else                    { reasons.push(`RSI ${fmt(rsiVal)} — Neutral`); }
-  }
-
-  // MACD
-  if (macd != null && sig != null) {
-    if (macd > sig && hist != null && histPrev != null && hist > histPrev) { score += 2; reasons.push('MACD bullish crossover with strengthening histogram'); }
-    else if (macd > sig) { score += 1; reasons.push('MACD above signal line'); }
-    else if (macd < sig && hist != null && histPrev != null && hist < histPrev) { score -= 2; reasons.push('MACD bearish crossover with weakening histogram'); }
-    else if (macd < sig) { score -= 1; reasons.push('MACD below signal line'); }
-  }
-
-  // Bollinger Bands
-  if (bbLast.lower != null) {
-    if (price <= bbLast.lower) { score += 2; reasons.push('Price at lower Bollinger Band — oversold squeeze'); }
-    else if (price >= bbLast.upper) { score -= 2; reasons.push('Price at upper Bollinger Band — overbought'); }
-    else if (price > bbLast.mid) { score += 1; reasons.push('Price above BB midline'); }
-    else { score -= 1; reasons.push('Price below BB midline'); }
-  }
-
-  // Proximity to support/resistance
-  const distToSupport    = ((price - support) / price) * 100;
-  const distToResistance = ((resistance - price) / price) * 100;
-  if (distToSupport < 3)      { score += 1; reasons.push(`Price near strong support at Rs ${fmt(support)}`); }
-  if (distToResistance < 3)   { score -= 1; reasons.push(`Price near strong resistance at Rs ${fmt(resistance)}`); }
-
-  // Determine action
-  let action, color, Icon;
-  if (score >= 3)       { action = 'BUY';  color = '#00D4AA'; Icon = TrendingUp;   }
-  else if (score <= -3) { action = 'SELL'; color = '#E53E3E'; Icon = TrendingDown; }
-  else                  { action = 'HOLD'; color = '#F5A623'; Icon = Minus;        }
-
-  // Targets & stop loss based on ATR
-  const atrMult = atrVal ?? (price * 0.02);
-  const stopLoss  = action === 'BUY'  ? price - 1.5 * atrMult
-                  : action === 'SELL' ? price + 1.5 * atrMult
-                  : price - 1.5 * atrMult;
-  const target1   = action === 'BUY'  ? price + 2 * atrMult
-                  : action === 'SELL' ? price - 2 * atrMult
-                  : null;
-  const target2   = action === 'BUY'  ? price + 3.5 * atrMult
-                  : action === 'SELL' ? price - 3.5 * atrMult
-                  : null;
-  const rr        = target1 ? Math.abs(target1 - price) / Math.abs(stopLoss - price) : null;
-
-  return {
-    action, color, Icon, score, reasons,
-    price, rsiVal, macd, sig, e20, e50, atrVal,
-    support, resistance,
-    stopLoss, target1, target2, rr,
-    bbUpper: bbLast?.upper, bbLower: bbLast?.lower
-  };
+  return {sym,action,color,score,reasons,price,change,rsiV,e10,e20,e50,atrV,marketStage,support,resistance,
+    demandZone:[demandLow,demandHigh],supplyZone:[supplyLow,supplyHigh],buyingZone:[buyZoneLow,buyZoneHigh],
+    stopLoss,target1,target2,rr,bbU:bbV.u,bbL:bbV.l,candles,avgVol,lastVol};
 }
 
-// ─── Candlestick SVG chart ────────────────────────────────────────────────────
-function CandlestickChart({ candles, signal }) {
-  if (!candles || candles.length === 0) return null;
-
-  const W = 900, H = 340, PAD = { top: 20, right: 60, bottom: 40, left: 60 };
-  const cw = W - PAD.left - PAD.right;
-  const ch = H - PAD.top - PAD.bottom;
-
-  const display = candles.slice(-80);
-  const allHighs = display.map(c => c.high);
-  const allLows  = display.map(c => c.low);
-  let minP = Math.min(...allLows) * 0.998;
-  let maxP = Math.max(...allHighs) * 1.002;
-
-  // include BB and EMAs in range
-  if (signal) {
-    if (signal.bbUpper) maxP = Math.max(maxP, signal.bbUpper * 1.001);
-    if (signal.bbLower) minP = Math.min(minP, signal.bbLower * 0.999);
-  }
-
-  const range = maxP - minP;
-  const xScale = (i) => PAD.left + (i / (display.length - 1)) * cw;
-  const yScale = (p) => PAD.top + ch - ((p - minP) / range) * ch;
-
-  const candleW = Math.max(2, Math.floor(cw / display.length) - 2);
-
-  // EMA lines for display candles
-  const allCloses  = candles.map(c => c.close);
-  const ema20full  = calcEMA(allCloses, 20);
-  const ema50full  = calcEMA(allCloses, 50);
-  const bbFull     = calcBollingerBands(allCloses);
-  const start      = candles.length - display.length;
-
-  const linePoints = (vals) =>
-    vals.slice(start).map((v, i) => v != null ? `${xScale(i)},${yScale(v)}` : null)
-      .filter(Boolean).join(' ');
-
-  const bbUpper  = bbFull.slice(start).map((b, i) => b.upper != null ? `${xScale(i)},${yScale(b.upper)}` : null).filter(Boolean).join(' ');
-  const bbLower  = bbFull.slice(start).map((b, i) => b.lower != null ? `${xScale(i)},${yScale(b.lower)}` : null).filter(Boolean).join(' ');
-  const bbMid    = bbFull.slice(start).map((b, i) => b.mid   != null ? `${xScale(i)},${yScale(b.mid)}`   : null).filter(Boolean).join(' ');
-
-  // Price grid lines
-  const gridCount = 5;
-  const gridLines = Array.from({ length: gridCount + 1 }, (_, i) => {
-    const price = minP + (range * i) / gridCount;
-    return { y: yScale(price), price };
-  });
-
-  // x-axis dates
-  const dateStep = Math.max(1, Math.floor(display.length / 8));
-  const dateLabels = display.map((c, i) => ({ i, date: c.date })).filter((_, i) => i % dateStep === 0);
-
-  // Signal lines
-  const sigLines = signal ? [
-    { price: signal.stopLoss,  color: '#E53E3E', label: `SL ${fmt(signal.stopLoss)}`,   dash: '6,3' },
-    { price: signal.target1,   color: '#00D4AA', label: `T1 ${fmt(signal.target1)}`,    dash: '4,2' },
-    { price: signal.target2,   color: '#00D4AA', label: `T2 ${fmt(signal.target2)}`,    dash: '2,2' },
-  ].filter(l => l.price != null && l.price > minP && l.price < maxP) : [];
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-      {/* Background */}
-      <rect width={W} height={H} fill="#0A0E1A" />
-      <rect x={PAD.left} y={PAD.top} width={cw} height={ch} fill="#0D1120" rx="2" />
-
-      {/* Grid lines */}
-      {gridLines.map(({ y, price }) => (
-        <g key={price}>
-          <line x1={PAD.left} y1={y} x2={PAD.left + cw} y2={y} stroke="#1E293B" strokeWidth="1" />
-          <text x={PAD.left - 6} y={y + 4} textAnchor="end" fill="#8892A4" fontSize="10" fontFamily="JetBrains Mono, monospace">
-            {price.toFixed(0)}
-          </text>
-        </g>
-      ))}
-
-      {/* Bollinger Bands fill */}
-      {bbUpper && bbLower && (
-        <polygon
-          points={`${bbUpper} ${bbLower.split(' ').reverse().join(' ')}`}
-          fill="rgba(245,166,35,0.06)"
-        />
-      )}
-      {bbUpper && <polyline points={bbUpper} fill="none" stroke="#F5A623" strokeWidth="0.8" strokeDasharray="3,3" opacity="0.6" />}
-      {bbLower && <polyline points={bbLower} fill="none" stroke="#F5A623" strokeWidth="0.8" strokeDasharray="3,3" opacity="0.6" />}
-      {bbMid   && <polyline points={bbMid}   fill="none" stroke="#F5A623" strokeWidth="0.6" strokeDasharray="2,4" opacity="0.4" />}
-
-      {/* EMA lines */}
-      <polyline points={linePoints(ema20full)} fill="none" stroke="#00D4AA" strokeWidth="1.2" opacity="0.8" />
-      <polyline points={linePoints(ema50full)} fill="none" stroke="#a78bfa" strokeWidth="1.2" opacity="0.8" />
-
-      {/* Candles */}
-      {display.map((c, i) => {
-        const x   = xScale(i);
-        const isUp = c.close >= c.open;
-        const col  = isUp ? '#00D4AA' : '#E53E3E';
-        const bodyTop  = yScale(Math.max(c.open, c.close));
-        const bodyBot  = yScale(Math.min(c.open, c.close));
-        const bodyH    = Math.max(1, bodyBot - bodyTop);
-        const halfW    = Math.max(1, candleW / 2);
-        return (
-          <g key={i}>
-            <line x1={x} y1={yScale(c.high)} x2={x} y2={yScale(c.low)} stroke={col} strokeWidth="1" />
-            <rect x={x - halfW} y={bodyTop} width={candleW} height={bodyH} fill={col} opacity="0.85" />
-          </g>
-        );
-      })}
-
-      {/* Signal horizontal lines */}
-      {sigLines.map(({ price: p, color, label, dash }) => {
-        const y = yScale(p);
-        return (
-          <g key={label}>
-            <line x1={PAD.left} y1={y} x2={PAD.left + cw} y2={y} stroke={color} strokeWidth="1.2" strokeDasharray={dash} opacity="0.9" />
-            <rect x={PAD.left + cw + 2} y={y - 8} width={54} height={14} fill="#0A0E1A" />
-            <text x={PAD.left + cw + 4} y={y + 3} fill={color} fontSize="9" fontFamily="JetBrains Mono, monospace">{label}</text>
-          </g>
-        );
-      })}
-
-      {/* Date labels */}
-      {dateLabels.map(({ i, date }) => (
-        <text key={i} x={xScale(i)} y={H - 6} textAnchor="middle" fill="#8892A4" fontSize="9" fontFamily="JetBrains Mono, monospace">
-          {date}
-        </text>
-      ))}
-
-      {/* Legend */}
-      <g>
-        <rect x={PAD.left + 8} y={PAD.top + 8} width={190} height={46} fill="rgba(10,14,26,0.85)" rx="3" />
-        <line x1={PAD.left + 16} y1={PAD.top + 22} x2={PAD.left + 30} y2={PAD.top + 22} stroke="#00D4AA" strokeWidth="1.5" />
-        <text x={PAD.left + 34} y={PAD.top + 26} fill="#00D4AA" fontSize="10" fontFamily="JetBrains Mono, monospace">EMA 20</text>
-        <line x1={PAD.left + 86} y1={PAD.top + 22} x2={PAD.left + 100} y2={PAD.top + 22} stroke="#a78bfa" strokeWidth="1.5" />
-        <text x={PAD.left + 104} y={PAD.top + 26} fill="#a78bfa" fontSize="10" fontFamily="JetBrains Mono, monospace">EMA 50</text>
-        <line x1={PAD.left + 16} y1={PAD.top + 40} x2={PAD.left + 30} y2={PAD.top + 40} stroke="#F5A623" strokeWidth="1" strokeDasharray="3,3" />
-        <text x={PAD.left + 34} y={PAD.top + 44} fill="#F5A623" fontSize="10" fontFamily="JetBrains Mono, monospace">Bollinger Bands</text>
-      </g>
+// ─── SVG Candlestick Chart ────────────────────────────────────────────────────
+function CandleChart({sig}){
+  if(!sig?.candles)return null;
+  const{candles,stopLoss,target1,target2,buyingZone}=sig;
+  const W=820,H=300,P={t:14,r:72,b:32,l:56};
+  const disp=candles.slice(-60),closes=candles.map(c=>c.close);
+  const ema20f=calcEMA(closes,20),ema50f=calcEMA(closes,50),bbF=calcBB(closes);
+  const start=candles.length-disp.length;
+  const hs=disp.map(c=>c.high),ls=disp.map(c=>c.low);
+  let mn=Math.min(...ls)*0.997,mx=Math.max(...hs)*1.003;
+  const cw=W-P.l-P.r,ch=H-P.t-P.b;
+  const xS=i=>P.l+(i/(disp.length-1))*cw,yS=p=>P.t+ch-((p-mn)/(mx-mn))*ch;
+  const bw=Math.max(2,Math.floor(cw/disp.length)-2);
+  const lp=(v,f)=>v.slice(f).map((x,i)=>x!=null?`${xS(i)},${yS(x)}`:null).filter(Boolean).join(' ');
+  const bbUp=bbF.slice(start).map((b,i)=>b.u!=null?`${xS(i)},${yS(b.u)}`:null).filter(Boolean).join(' ');
+  const bbLo=bbF.slice(start).map((b,i)=>b.l!=null?`${xS(i)},${yS(b.l)}`:null).filter(Boolean).join(' ');
+  const gL=Array.from({length:6},(_,i)=>({y:yS(mn+(mx-mn)*i/5),p:mn+(mx-mn)*i/5}));
+  const sL=[{p:stopLoss,c:'#e74c3c',lb:`SL ${fmt(stopLoss)}`,d:'6,3'},{p:target1,c:'#27ae60',lb:`T1 ${fmt(target1)}`,d:'4,2'},{p:target2,c:'#1abc9c',lb:`T2 ${fmt(target2)}`,d:'2,2'},{p:buyingZone[0],c:'#f39c12',lb:`BZ ${fmt(buyingZone[0])}`,d:'3,3'}].filter(x=>x.p!=null&&x.p>mn&&x.p<mx);
+  const step=Math.max(1,Math.floor(disp.length/7)),dL=disp.map((c,i)=>({i,d:c.date})).filter((_,i)=>i%step===0);
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',display:'block'}}>
+      <rect width={W} height={H} fill="#0f172a"/><rect x={P.l} y={P.t} width={cw} height={ch} fill="#0c1428" rx="2"/>
+      {gL.map(({y,p})=><g key={p}><line x1={P.l} y1={y} x2={P.l+cw} y2={y} stroke="#1e293b" strokeWidth="1"/><text x={P.l-4} y={y+4} textAnchor="end" fill="#64748b" fontSize="9" fontFamily="monospace">{p.toFixed(0)}</text></g>)}
+      {bbUp&&bbLo&&<polygon points={`${bbUp} ${bbLo.split(' ').reverse().join(' ')}`} fill="rgba(245,166,35,0.05)"/>}
+      {bbUp&&<polyline points={bbUp} fill="none" stroke="#f59e0b" strokeWidth="0.8" strokeDasharray="3,3" opacity="0.5"/>}
+      {bbLo&&<polyline points={bbLo} fill="none" stroke="#f59e0b" strokeWidth="0.8" strokeDasharray="3,3" opacity="0.5"/>}
+      {buyingZone[0]>mn&&buyingZone[1]<mx&&<rect x={P.l} y={yS(buyingZone[1])} width={cw} height={Math.max(1,yS(buyingZone[0])-yS(buyingZone[1]))} fill="rgba(39,174,96,0.07)"/>}
+      <polyline points={lp(ema20f,start)} fill="none" stroke="#3b82f6" strokeWidth="1.3" opacity="0.85"/>
+      <polyline points={lp(ema50f,start)} fill="none" stroke="#a855f7" strokeWidth="1.3" opacity="0.85"/>
+      {disp.map((c,i)=>{const x=xS(i),isUp=c.close>=c.open,col=isUp?'#27ae60':'#e74c3c',bT=yS(Math.max(c.open,c.close)),bB=yS(Math.min(c.open,c.close));return(<g key={i}><line x1={x} y1={yS(c.high)} x2={x} y2={yS(c.low)} stroke={col} strokeWidth="1"/><rect x={x-bw/2} y={bT} width={bw} height={Math.max(1,bB-bT)} fill={col} opacity="0.88"/></g>);})}
+      {sL.map(({p,c,lb,d})=>{const y=yS(p);return(<g key={lb}><line x1={P.l} y1={y} x2={P.l+cw} y2={y} stroke={c} strokeWidth="1.2" strokeDasharray={d} opacity="0.9"/><rect x={P.l+cw+2} y={y-8} width={58} height={14} fill="#0f172a"/><text x={P.l+cw+4} y={y+3} fill={c} fontSize="8.5" fontFamily="monospace">{lb}</text></g>);})}
+      {dL.map(({i,d})=><text key={i} x={xS(i)} y={H-4} textAnchor="middle" fill="#64748b" fontSize="8.5" fontFamily="monospace">{d}</text>)}
+      <rect x={P.l+6} y={P.t+5} width={175} height={28} fill="rgba(15,23,42,0.9)" rx="2"/>
+      <line x1={P.l+13} y1={P.t+16} x2={P.l+23} y2={P.t+16} stroke="#3b82f6" strokeWidth="1.5"/><text x={P.l+27} y={P.t+20} fill="#3b82f6" fontSize="9" fontFamily="monospace">EMA20</text>
+      <line x1={P.l+75} y1={P.t+16} x2={P.l+85} y2={P.t+16} stroke="#a855f7" strokeWidth="1.5"/><text x={P.l+89} y={P.t+20} fill="#a855f7" fontSize="9" fontFamily="monospace">EMA50</text>
+      <rect x={P.l+135} y={P.t+10} width={9} height={7} fill="rgba(39,174,96,0.2)" stroke="#27ae60" strokeWidth="0.5"/><text x={P.l+148} y={P.t+20} fill="#27ae60" fontSize="9" fontFamily="monospace">BZ</text>
     </svg>
   );
 }
-
-// ─── Volume bar chart ─────────────────────────────────────────────────────────
-function VolumeChart({ candles }) {
-  if (!candles || candles.length === 0) return null;
-  const W = 900, H = 80, PAD = { top: 8, right: 60, bottom: 20, left: 60 };
-  const display = candles.slice(-80);
-  const maxVol = Math.max(...display.map(c => c.volume || 0));
-  const cw = W - PAD.left - PAD.right;
-  const ch = H - PAD.top - PAD.bottom;
-  const barW = Math.max(1, Math.floor(cw / display.length) - 1);
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', marginTop: '-2px' }}>
-      <rect width={W} height={H} fill="#0A0E1A" />
-      {display.map((c, i) => {
-        const x = PAD.left + (i / (display.length - 1)) * cw;
-        const barH = maxVol ? (c.volume / maxVol) * ch : 0;
-        const isUp = c.close >= c.open;
-        return (
-          <rect key={i} x={x - barW / 2} y={PAD.top + ch - barH} width={barW} height={barH}
-            fill={isUp ? 'rgba(0,212,170,0.45)' : 'rgba(229,62,62,0.45)'} />
-        );
-      })}
-      <text x={PAD.left - 6} y={PAD.top + 10} textAnchor="end" fill="#8892A4" fontSize="9" fontFamily="JetBrains Mono, monospace">VOL</text>
-    </svg>
-  );
+function VolChart({sig}){
+  if(!sig?.candles)return null;
+  const W=820,H=50,P={t:4,r:72,b:10,l:56};
+  const d=sig.candles.slice(-60),mx=Math.max(...d.map(c=>c.volume||1));
+  const cw=W-P.l-P.r,ch=H-P.t-P.b,bw=Math.max(1,Math.floor(cw/d.length)-1);
+  return(<svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',display:'block',marginTop:'-1px'}}>
+    <rect width={W} height={H} fill="#0f172a"/>
+    {d.map((c,i)=>{const x=P.l+(i/(d.length-1))*cw,bH=(c.volume/mx)*ch;return<rect key={i} x={x-bw/2} y={P.t+ch-bH} width={bw} height={bH} fill={c.close>=c.open?'rgba(39,174,96,0.45)':'rgba(231,76,60,0.45)'}/>;})}</svg>);
 }
 
-// ─── RSI mini chart ───────────────────────────────────────────────────────────
-function RSIChart({ candles }) {
-  if (!candles || candles.length === 0) return null;
-  const W = 900, H = 70, PAD = { top: 8, right: 60, bottom: 18, left: 60 };
-  const display = candles.slice(-80);
-  const closes  = candles.map(c => c.close);
-  const rsiAll  = calcRSI(closes);
-  const rsiDisp = rsiAll.slice(-80);
-  const cw = W - PAD.left - PAD.right;
-  const ch = H - PAD.top - PAD.bottom;
-  const yR = (v) => PAD.top + ch - ((v - 0) / 100) * ch;
-  const points = rsiDisp.map((v, i) => {
-    if (v == null) return null;
-    const x = PAD.left + (i / (rsiDisp.length - 1)) * cw;
-    return `${x},${yR(v)}`;
-  }).filter(Boolean).join(' ');
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', marginTop: '-2px' }}>
-      <rect width={W} height={H} fill="#0A0E1A" />
-      {/* 30/70 lines */}
-      {[30, 50, 70].map(level => (
-        <g key={level}>
-          <line x1={PAD.left} y1={yR(level)} x2={PAD.left + cw} y2={yR(level)}
-            stroke={level === 50 ? '#2D3748' : level === 70 ? '#E53E3E' : '#00D4AA'}
-            strokeWidth="0.7" strokeDasharray="3,3" opacity="0.6" />
-          <text x={PAD.left - 6} y={yR(level) + 3} textAnchor="end" fill="#8892A4" fontSize="8" fontFamily="JetBrains Mono, monospace">{level}</text>
-        </g>
-      ))}
-      <polyline points={points} fill="none" stroke="#a78bfa" strokeWidth="1.2" />
-      <text x={PAD.left - 6} y={PAD.top + 8} textAnchor="end" fill="#8892A4" fontSize="9" fontFamily="JetBrains Mono, monospace">RSI</text>
-    </svg>
-  );
+// ─── Strategy right panel ─────────────────────────────────────────────────────
+function SR({label,value,vc,bold}){
+  return(<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid #e2e8f0'}}>
+    <span style={{fontSize:'0.73rem',color:'#64748b'}}>{label}</span>
+    <span style={{fontFamily:'monospace',fontSize:'0.76rem',color:vc||'#1e293b',fontWeight:bold?700:600}}>{value}</span>
+  </div>);
 }
-
-// ─── Signal card ──────────────────────────────────────────────────────────────
-function SignalCard({ signal, ticker }) {
-  if (!signal) return null;
-  const { action, color, Icon, score, reasons, price, rsiVal, stopLoss, target1, target2, rr, support, resistance } = signal;
-
-  const bgColor = action === 'BUY' ? 'rgba(0,212,170,0.07)'
-               : action === 'SELL' ? 'rgba(229,62,62,0.07)'
-               : 'rgba(245,166,35,0.07)';
-  const borderCol = action === 'BUY' ? 'rgba(0,212,170,0.35)'
-                  : action === 'SELL' ? 'rgba(229,62,62,0.35)'
-                  : 'rgba(245,166,35,0.35)';
-
-  return (
-    <div style={{ background: bgColor, border: `1px solid ${borderCol}`, borderRadius: '4px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ background: color, borderRadius: '4px', width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Icon size={24} color="#0A0E1A" />
-          </div>
-          <div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.05em' }}>{action}</div>
-            <div style={{ fontSize: '0.78rem', color: '#8892A4' }}>{ticker} · ZenChart Signal</div>
-          </div>
+function StratPanel({sig}){
+  const{action,price,stopLoss,target1,target2,buyingZone,demandZone,supplyZone,rr,marketStage,rsiV,score,lastVol,avgVol}=sig;
+  const isB=action==='BUY',isS=action==='SELL';
+  const hdrBg=isB?'#1a7a4a':isS?'#c0392b':'#e67e22';
+  const strat=isB?'WAIT AND BUY':isS?'WAIT AND SELL':'WAIT AND WATCH';
+  const sc=marketStage.includes('Up')||marketStage.includes('Acc')?'#166534':marketStage.includes('Down')||marketStage.includes('Dist')?'#991b1b':'#92400e';
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:'8px',minWidth:'230px'}}>
+      {/* Strategy box */}
+      <div style={{border:'1px solid #cbd5e1',borderRadius:'4px',overflow:'hidden',background:'#fff'}}>
+        <div style={{background:hdrBg,padding:'10px 12px',textAlign:'center'}}>
+          <div style={{fontSize:'0.65rem',fontWeight:700,color:'#fff',letterSpacing:'0.1em',opacity:0.85}}>CURRENT STRATEGY</div>
+          <div style={{fontSize:'1.1rem',fontWeight:800,color:'#fff',letterSpacing:'0.03em'}}>{strat}</div>
+          <div style={{fontSize:'0.65rem',color:'rgba(255,255,255,0.7)',fontWeight:600}}>({action})</div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '1.1rem', color: '#fff' }}>Rs {fmt(price)}</div>
-          <div style={{ fontSize: '0.75rem', color: '#8892A4' }}>Current Price</div>
+        <div style={{padding:'8px 12px',display:'flex',flexDirection:'column'}}>
+          <SR label="Current Market Stage" value={marketStage} vc={sc}/>
+          {isB&&<><SR label="Immediate Demand Zone" value={`${fmt(demandZone[0])} – ${fmt(demandZone[1])}`} vc="#166534"/><SR label="Immediate Supply Zone" value={`${fmt(supplyZone[0])} – ${fmt(supplyZone[1])}`} vc="#991b1b"/></>}
+          {isS&&<><SR label="Immediate Supply Zone" value={`${fmt(supplyZone[0])} – ${fmt(supplyZone[1])}`} vc="#991b1b"/><SR label="Immediate Demand Zone" value={`${fmt(demandZone[0])} – ${fmt(demandZone[1])}`} vc="#166534"/></>}
+          {!isB&&!isS&&<><SR label="Demand Zone" value={`${fmt(demandZone[0])} – ${fmt(demandZone[1])}`} vc="#166534"/><SR label="Supply Zone" value={`${fmt(supplyZone[0])} – ${fmt(supplyZone[1])}`} vc="#991b1b"/></>}
+          <div style={{marginTop:'4px',paddingTop:'4px',borderTop:'2px solid #e2e8f0'}}>
+            <SR label="Stop Loss Only If Closing Below" value={`${fmt(stopLoss)}`} vc="#c0392b" bold/>
+          </div>
+          {isB&&<SR label="Buying Zone" value={`${fmt(buyingZone[0])} – ${fmt(buyingZone[1])}`} vc="#166534"/>}
+          <div style={{marginTop:'4px',paddingTop:'4px',borderTop:'1px solid #e2e8f0'}}>
+            <SR label="Target 1" value={`Rs ${fmt(target1)}`} vc="#166534"/>
+            <SR label="Target 2" value={`Rs ${fmt(target2)}`} vc="#0d9488"/>
+            <SR label="Risk : Reward" value={rr?`1 : ${rr.toFixed(2)}`:'—'} vc="#92400e"/>
+          </div>
         </div>
       </div>
+      {/* BUY / SELL / HOLD buttons */}
+      <div style={{display:'flex',borderRadius:'4px',overflow:'hidden',border:'1px solid #cbd5e1'}}>
+        {[['BUY','#1a7a4a'],['SELL','#c0392b'],['HOLD','#e67e22']].map(([a,c])=>(
+          <div key={a} style={{flex:1,padding:'8px 0',textAlign:'center',background:action===a?c:'#f8fafc',color:action===a?'#fff':c,fontWeight:700,fontSize:'0.82rem',borderRight:'1px solid #cbd5e1'}}>{a}</div>
+        ))}
+      </div>
+      {/* Indicators */}
+      <div style={{background:'#fff',border:'1px solid #cbd5e1',borderRadius:'4px',padding:'8px 12px'}}>
+        <div style={{fontSize:'0.65rem',color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'4px'}}>Indicators</div>
+        <SR label="RSI (14)" value={fmt(rsiV)} vc={rsiV<35?'#166534':rsiV>65?'#991b1b':'#92400e'}/>
+        <SR label="Volume" value={fmtK(lastVol)} vc={lastVol>avgVol*1.3?'#166534':'#64748b'}/>
+        <SR label="Signal Score" value={`${score>0?'+':''}${score}`} vc={isB?'#166534':isS?'#991b1b':'#92400e'}/>
+      </div>
+    </div>
+  );
+}
 
-      {/* Key levels */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px,1fr))', gap: '10px' }}>
-        {[
-          { label: 'Stop Loss',  value: `Rs ${fmt(stopLoss)}`,  icon: ShieldAlert, col: '#E53E3E' },
-          { label: 'Target 1',   value: `Rs ${fmt(target1)}`,   icon: Target,      col: '#00D4AA' },
-          { label: 'Target 2',   value: `Rs ${fmt(target2)}`,   icon: Target,      col: '#00D4AA' },
-          { label: 'Risk/Reward',value: rr ? `1 : ${rr.toFixed(2)}` : '—', icon: DollarSign, col: '#F5A623' },
-          { label: 'Support',    value: `Rs ${fmt(support)}`,   icon: BarChart2,   col: '#a78bfa' },
-          { label: 'Resistance', value: `Rs ${fmt(resistance)}`,icon: BarChart2,   col: '#a78bfa' },
-        ].map(({ label, value, icon: Ic, col }) => (
-          <div key={label} style={{ background: '#111827', border: '1px solid #2D3748', borderRadius: '4px', padding: '10px 12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-              <Ic size={12} color={col} />
-              <span style={{ fontSize: '0.72rem', color: '#8892A4', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
-            </div>
-            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.88rem', color: col, fontWeight: 600 }}>{value}</div>
+// ─── Detail view with chart + strategy panel ──────────────────────────────────
+function DetailView({sig,onBack}){
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:'12px',background:'#f1f5f9',minHeight:'100%',padding:'4px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+        <button onClick={onBack} style={{display:'flex',alignItems:'center',gap:'5px',padding:'6px 12px',background:'#fff',border:'1px solid #cbd5e1',borderRadius:'4px',color:'#475569',fontSize:'0.8rem',cursor:'pointer'}}>
+          <ChevronLeft size={13}/> Back to list
+        </button>
+        <div style={{fontFamily:'monospace',fontWeight:700,fontSize:'1rem',color:'#1e293b'}}>{sig.sym}</div>
+        <div style={{fontSize:'0.72rem',color:'#94a3b8'}}>Live data · Merolagani · {sig.candles.length} days</div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:'12px',alignItems:'start'}}>
+        {/* Chart */}
+        <div style={{background:'#0f172a',borderRadius:'6px',overflow:'hidden',border:'1px solid #1e293b'}}>
+          <div style={{padding:'7px 12px',borderBottom:'1px solid #1e293b',fontSize:'0.72rem',color:'#64748b',fontFamily:'monospace'}}>
+            {sig.sym} · Daily · EMA20 · EMA50 · Bollinger Bands
+          </div>
+          <CandleChart sig={sig}/>
+          <VolChart sig={sig}/>
+        </div>
+        {/* Strategy panel */}
+        <StratPanel sig={sig}/>
+      </div>
+      {/* Rationale */}
+      <div style={{background:'#fff',border:'1px solid #cbd5e1',borderRadius:'4px',padding:'10px 14px'}}>
+        <div style={{fontSize:'0.67rem',color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'6px'}}>Signal Rationale</div>
+        {sig.reasons.map((r,i)=>(
+          <div key={i} style={{display:'flex',gap:'7px',fontSize:'0.78rem',color:'#334155',padding:'3px 0',borderBottom:'1px solid #f1f5f9'}}>
+            <span style={{color:sig.color,flexShrink:0}}>▸</span>{r}
           </div>
         ))}
       </div>
-
-      {/* Reasoning */}
-      <div style={{ background: '#111827', border: '1px solid #2D3748', borderRadius: '4px', padding: '12px 16px' }}>
-        <div style={{ fontSize: '0.75rem', color: '#8892A4', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
-          Signal Rationale  <span style={{ color: color }}>Score: {score > 0 ? '+' : ''}{score}</span>
-        </div>
-        <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          {reasons.map((r, i) => (
-            <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.82rem', color: '#cdd5e0' }}>
-              <span style={{ color, marginTop: '2px', flexShrink: 0 }}>▸</span>{r}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div style={{ fontSize: '0.72rem', color: '#4B5563', borderTop: '1px solid #2D3748', paddingTop: '10px' }}>
-        ⚠ ZenChart signals are generated from technical indicators (EMA, RSI, MACD, Bollinger Bands, ATR) on historical price data. This is for educational purposes only — not financial advice. Always do your own due diligence.
-      </div>
+      <div style={{fontSize:'0.67rem',color:'#94a3b8'}}>⚠ For educational purposes only. Not financial advice.</div>
     </div>
   );
 }
 
-// ─── Main ZenChart component ──────────────────────────────────────────────────
-export default function ZenChart({ initialTicker }) {
-  const [ticker,   setTicker]   = useState(initialTicker || 'NABIL');
-  const [input,    setInput]    = useState(initialTicker || 'NABIL');
-  const [candles,  setCandles]  = useState(null);
-  const [signal,   setSignal]   = useState(null);
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState(null);
-  const [showDrop, setShowDrop] = useState(false);
-  const [dropFilter, setDropFilter] = useState('');
-  const dropRef = useRef(null);
+// ─── Main ZenChart ────────────────────────────────────────────────────────────
+export default function ZenChart() {
+  const [tab,setTab]=useState('BUY');
+  const [results,setResults]=useState({BUY:[],SELL:[],HOLD:[]});
+  const [scanning,setScanning]=useState(false);
+  const [prog,setProg]=useState({done:0,total:0,sym:''});
+  const [detail,setDetail]=useState(null);
+  const [meta,setMeta]=useState(null);
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handler = (e) => { if (dropRef.current && !dropRef.current.contains(e.target)) setShowDrop(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const fetchData = useCallback(async (sym) => {
-    setLoading(true);
-    setError(null);
-    setCandles(null);
-    setSignal(null);
-
-    const to   = toUnix(0);
-    const from = toUnix(365);
-    const url  = `https://nepsealpha.com/trading/1/history?symbol=${sym}&resolution=1D&from=${from}&to=${to}&currencyCode=NRS`;
-
-    try {
-      const res  = await fetch(url, { mode: 'cors' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-
-      if (!data.t || data.t.length < 20) throw new Error('Insufficient price history for this symbol.');
-
-      const parsed = data.t.map((t, i) => ({
-        date:   new Date(t * 1000).toLocaleDateString('en-NP', { month: 'short', day: 'numeric' }),
-        open:   data.o[i], high: data.h[i], low: data.l[i], close: data.c[i], volume: data.v?.[i] || 0
-      }));
-
-      setCandles(parsed);
-      setSignal(generateSignal(parsed));
-    } catch (err) {
-      // NepseAlpha may block CORS — fall back to demo data
-      if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.message.includes('CORS')) {
-        setError('cors');
-        // Generate plausible demo candles for signal demonstration
-        const demo = generateDemoCandles(sym);
-        setCandles(demo);
-        setSignal(generateSignal(demo));
-      } else {
-        setError(err.message);
+  const runScan=useCallback(async()=>{
+    setScanning(true); setDetail(null);
+    setResults({BUY:[],SELL:[],HOLD:[]}); setMeta(null);
+    setProg({done:0,total:ALL_TICKERS.length,sym:''});
+    const out={BUY:[],SELL:[],HOLD:[]};
+    let failed=0;
+    for(let i=0;i<ALL_TICKERS.length;i+=5){
+      const batch=ALL_TICKERS.slice(i,i+5);
+      setProg({done:i,total:ALL_TICKERS.length,sym:batch[0]});
+      const fetched=await Promise.all(batch.map(sym=>fetchMerolagani(sym).then(c=>({sym,c}))));
+      for(const{sym,c}of fetched){
+        if(!c){failed++;continue;}
+        const sig=analyze(c,sym);
+        if(sig)out[sig.action].push(sig);
       }
-    } finally {
-      setLoading(false);
+      setResults({BUY:[...out.BUY].sort((a,b)=>b.score-a.score),SELL:[...out.SELL].sort((a,b)=>a.score-b.score),HOLD:[...out.HOLD].sort((a,b)=>Math.abs(b.score)-Math.abs(a.score))});
+      await new Promise(r=>setTimeout(r,180));
     }
-  }, []);
+    setProg(p=>({...p,done:ALL_TICKERS.length}));
+    setScanning(false);
+    setMeta({time:new Date().toLocaleTimeString(),failed});
+  },[]);
 
-  useEffect(() => { fetchData(ticker); }, [ticker, fetchData]);
+  useEffect(()=>{runScan();},[runScan]);
 
-  const handleGo = () => {
-    const sym = input.trim().toUpperCase();
-    if (!sym) return;
-    setTicker(sym);
-    setShowDrop(false);
-  };
+  const pct=prog.total?Math.round(prog.done/prog.total*100):0;
 
-  const handleSelect = (sym) => {
-    setInput(sym);
-    setTicker(sym);
-    setShowDrop(false);
-    setDropFilter('');
-  };
+  if(detail) return <div className="workspace" style={{background:'#f1f5f9'}}><DetailView sig={detail} onBack={()=>setDetail(null)}/></div>;
 
-  const filtered = ALL_TICKERS.filter(t => t.includes(dropFilter.toUpperCase())).slice(0, 40);
+  const tabColors={BUY:'#1a7a4a',SELL:'#c0392b',HOLD:'#e67e22'};
+  const tabIcons={BUY:<TrendingUp size={13}/>,SELL:<TrendingDown size={13}/>,HOLD:<Minus size={13}/>};
+  const list=results[tab];
 
-  return (
-    <div className="workspace" style={{ gap: '20px' }}>
-      {/* ── Title bar ── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Zap size={22} color="#00D4AA" />
-          <h2 style={{ color: '#fff' }}>
-            Zen<span style={{ color: '#00D4AA' }}>Chart</span>
-            <span style={{ fontSize: '0.7rem', color: '#8892A4', marginLeft: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 400 }}>
-              AI-POWERED TECHNICAL SIGNALS
-            </span>
-          </h2>
+  return(
+    <div className="workspace" style={{gap:'0',padding:'0'}}>
+      {/* Header bar */}
+      <div style={{background:'#1e293b',padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'8px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+          <Zap size={18} color="#f59e0b"/>
+          <span style={{color:'#fff',fontWeight:700,fontSize:'1rem'}}>Zen<span style={{color:'#f59e0b'}}>Chart</span></span>
+          <span style={{fontSize:'0.65rem',color:'#64748b',fontFamily:'monospace'}}>LIVE · {ALL_TICKERS.length} NEPSE STOCKS</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} ref={dropRef}>
-          {/* Ticker input + dropdown */}
-          <div style={{ position: 'relative' }}>
-            <div style={{ display: 'flex', gap: '0' }}>
-              <input
-                value={input}
-                onChange={e => { setInput(e.target.value.toUpperCase()); setShowDrop(true); setDropFilter(e.target.value); }}
-                onFocus={() => setShowDrop(true)}
-                onKeyDown={e => e.key === 'Enter' && handleGo()}
-                placeholder="Symbol…"
-                style={{
-                  padding: '8px 12px', fontFamily: 'JetBrains Mono, monospace',
-                  background: '#111827', border: '1px solid #2D3748', borderRight: 'none',
-                  color: '#00D4AA', borderRadius: '4px 0 0 4px', width: '110px', textTransform: 'uppercase'
-                }}
-              />
-              <button
-                onClick={() => setShowDrop(v => !v)}
-                style={{ padding: '8px 6px', background: '#111827', border: '1px solid #2D3748', borderLeft: 'none', color: '#8892A4', borderRadius: '0' }}
-              ><ChevronDown size={14} /></button>
-              <button
-                onClick={handleGo}
-                style={{ padding: '8px 14px', background: '#00D4AA', color: '#0A0E1A', fontWeight: 700, borderRadius: '0 4px 4px 0', fontSize: '0.85rem' }}
-              >GO</button>
-            </div>
-            {showDrop && (
-              <div style={{
-                position: 'absolute', top: '38px', left: 0, zIndex: 100,
-                background: '#111827', border: '1px solid #2D3748', borderRadius: '4px',
-                maxHeight: '260px', overflowY: 'auto', width: '160px', boxShadow: '0 8px 24px rgba(0,0,0,0.6)'
-              }}>
-                <div style={{ padding: '6px' }}>
-                  <input
-                    autoFocus
-                    placeholder="Search…"
-                    value={dropFilter}
-                    onChange={e => setDropFilter(e.target.value.toUpperCase())}
-                    style={{ width: '100%', padding: '5px 8px', background: '#0A0E1A', border: '1px solid #2D3748', color: '#fff', borderRadius: '3px', fontSize: '0.8rem', fontFamily: 'JetBrains Mono, monospace' }}
-                  />
-                </div>
-                {filtered.map(sym => (
-                  <button key={sym} onClick={() => handleSelect(sym)} style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px',
-                    fontFamily: 'JetBrains Mono, monospace', fontSize: '0.82rem',
-                    color: sym === ticker ? '#00D4AA' : '#cdd5e0',
-                    background: sym === ticker ? 'rgba(0,212,170,0.08)' : 'transparent',
-                    borderBottom: '1px solid #1E293B'
-                  }}>{sym}</button>
-                ))}
-                {filtered.length === 0 && <div style={{ padding: '10px 12px', color: '#8892A4', fontSize: '0.8rem' }}>No match</div>}
-              </div>
-            )}
-          </div>
-          <button
-            onClick={() => fetchData(ticker)}
-            disabled={loading}
-            title="Refresh"
-            style={{ padding: '8px 10px', background: '#111827', border: '1px solid #2D3748', borderRadius: '4px', color: '#8892A4' }}
-          ><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
+        <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+          {meta&&!scanning&&<span style={{fontSize:'0.68rem',color:'#64748b',fontFamily:'monospace'}}>{meta.time}{meta.failed>0?` · ${meta.failed} no-data`:''}</span>}
+          <button onClick={runScan} disabled={scanning}
+            style={{display:'flex',alignItems:'center',gap:'5px',padding:'6px 12px',background:scanning?'#334155':'#f59e0b',border:'none',borderRadius:'4px',color:scanning?'#64748b':'#1e293b',fontSize:'0.78rem',fontWeight:700,cursor:scanning?'default':'pointer'}}>
+            <RefreshCw size={12} style={scanning?{animation:'spin 1s linear infinite'}:{}}/>{scanning?`${pct}%`:'Re-Scan'}
+          </button>
         </div>
       </div>
 
-      {/* ── CORS warning ── */}
-      {error === 'cors' && (
-        <div style={{ background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.3)', borderRadius: '4px', padding: '10px 14px', display: 'flex', gap: '8px', fontSize: '0.8rem', color: '#F5A623' }}>
-          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />
-          NepseAlpha data couldn't be fetched directly (CORS restriction). Showing chart with demo price data. Open the site via NepseAlpha for real data.
-        </div>
-      )}
-      {error && error !== 'cors' && (
-        <div style={{ background: 'rgba(229,62,62,0.08)', border: '1px solid rgba(229,62,62,0.3)', borderRadius: '4px', padding: '10px 14px', fontSize: '0.82rem', color: '#E53E3E' }}>
-          {error}
-        </div>
-      )}
-
-      {/* ── Loading ── */}
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: '#8892A4' }}>
-          <RefreshCw size={28} style={{ animation: 'spin 1s linear infinite', marginBottom: '12px' }} />
-          <div style={{ fontFamily: 'JetBrains Mono, monospace' }}>Fetching {ticker} data…</div>
-        </div>
-      )}
-
-      {/* ── Chart area ── */}
-      {!loading && candles && (
-        <div style={{ background: '#111827', border: '1px solid #2D3748', borderRadius: '4px', overflow: 'hidden' }}>
-          <div style={{ padding: '10px 16px', borderBottom: '1px solid #2D3748', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#00D4AA' }}>{ticker}</span>
-            <span style={{ fontSize: '0.75rem', color: '#8892A4' }}>Daily · {candles.length} candles · EMA20 · EMA50 · Bollinger Bands</span>
+      {/* Progress */}
+      {scanning&&(
+        <div style={{background:'#0f172a',padding:'0'}}>
+          <div style={{height:'3px',background:'#1e293b'}}><div style={{height:'100%',background:'#f59e0b',width:`${pct}%`,transition:'width 0.3s'}}/></div>
+          <div style={{padding:'6px 16px',fontSize:'0.68rem',color:'#64748b',fontFamily:'monospace',display:'flex',justifyContent:'space-between'}}>
+            <span>Scanning <span style={{color:'#f59e0b'}}>{prog.sym}</span>…</span>
+            <span>BUY {results.BUY.length} · SELL {results.SELL.length} · HOLD {results.HOLD.length}</span>
           </div>
-          <CandlestickChart candles={candles} signal={signal} />
-          <VolumeChart candles={candles} />
-          <RSIChart   candles={candles} />
         </div>
       )}
 
-      {/* ── Signal card ── */}
-      {!loading && signal && <SignalCard signal={signal} ticker={ticker} />}
+      {/* Tabs — exact Merolagani style */}
+      <div style={{display:'flex',borderBottom:'2px solid #e2e8f0',background:'#fff'}}>
+        {['BUY','SELL','HOLD'].map(t=>(
+          <button key={t} onClick={()=>setTab(t)} style={{
+            flex:1, padding:'10px 0', display:'flex', alignItems:'center', justifyContent:'center', gap:'6px',
+            background:tab===t?tabColors[t]:'#fff',
+            color:tab===t?'#fff':tabColors[t],
+            fontWeight:700, fontSize:'0.9rem', border:'none',
+            borderRight:'1px solid #e2e8f0', cursor:'pointer',
+            transition:'all 0.15s'
+          }}>
+            {tabIcons[t]}{t}
+            <span style={{background:tab===t?'rgba(255,255,255,0.25)':'rgba(0,0,0,0.07)',borderRadius:'99px',padding:'0 7px',fontSize:'0.72rem'}}>{results[t].length}</span>
+          </button>
+        ))}
+      </div>
 
-      {/* Spin keyframes */}
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } .spin { animation: spin 1s linear infinite; }`}</style>
+      {/* Table — exactly like Merolagani */}
+      <div style={{background:'#fff',flex:1}}>
+        {/* Table header */}
+        <div style={{display:'grid',gridTemplateColumns:'40px 1fr 90px 80px 80px',padding:'7px 12px',background:'#f8fafc',borderBottom:'1px solid #e2e8f0'}}>
+          {['S.N','Stock','LTP','Change','Score'].map(h=>(
+            <div key={h} style={{fontSize:'0.72rem',fontWeight:700,color:'#64748b',textAlign:h==='S.N'?'center':'left'}}>{h}</div>
+          ))}
+        </div>
+
+        {/* Rows */}
+        {list.length===0?(
+          <div style={{textAlign:'center',padding:'40px 0',color:'#94a3b8'}}>
+            <BarChart2 size={28} style={{marginBottom:'8px',opacity:0.3,display:'block',margin:'0 auto 8px'}}/>
+            {scanning?'Scanning…':`No ${tab} signals yet.`}
+          </div>
+        ):(
+          list.map((sig,idx)=>{
+            const isUp=sig.change>=0;
+            const rowBg=tab==='BUY'?(idx%2===0?'#f0fdf4':'#dcfce7'):tab==='SELL'?(idx%2===0?'#fef2f2':'#fee2e2'):(idx%2===0?'#fffbeb':'#fef3c7');
+            return(
+              <div key={sig.sym} onClick={()=>setDetail(sig)}
+                style={{display:'grid',gridTemplateColumns:'40px 1fr 90px 80px 80px',padding:'8px 12px',background:rowBg,borderBottom:'1px solid rgba(0,0,0,0.04)',cursor:'pointer',transition:'filter 0.1s'}}
+                onMouseOver={e=>e.currentTarget.style.filter='brightness(0.95)'}
+                onMouseOut={e=>e.currentTarget.style.filter='brightness(1)'}>
+                <div style={{textAlign:'center',fontSize:'0.78rem',color:'#64748b',fontWeight:600}}>{idx+1}</div>
+                <div style={{fontWeight:700,fontSize:'0.82rem',color:'#1e293b',fontFamily:'monospace'}}>{sig.sym}</div>
+                <div style={{fontFamily:'monospace',fontSize:'0.82rem',color:'#1e293b',fontWeight:600}}>{fmt(sig.price)}</div>
+                <div style={{fontFamily:'monospace',fontSize:'0.78rem',color:isUp?'#166534':'#991b1b',fontWeight:600}}>{isUp?'+':''}{fmt(sig.change)}%</div>
+                <div style={{fontFamily:'monospace',fontSize:'0.78rem',color:sig.score>=3?'#166534':sig.score<=-3?'#991b1b':'#92400e',fontWeight:700}}>{sig.score>0?'+':''}{sig.score}</div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Footer note */}
+      {!scanning&&list.length>0&&(
+        <div style={{background:'#f8fafc',borderTop:'1px solid #e2e8f0',padding:'6px 12px',fontSize:'0.67rem',color:'#94a3b8',display:'flex',justifyContent:'space-between'}}>
+          <span>Click any row for chart & strategy details</span>
+          <span>Data: Merolagani · Signals: EMA, RSI, MACD, BB, ATR</span>
+        </div>
+      )}
+
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
-}
-
-// ─── Demo candle generator (fallback when CORS blocks real data) ──────────────
-function generateDemoCandles(sym) {
-  const seed = sym.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const rng  = (() => { let s = seed; return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; }; })();
-
-  const basePrice = 200 + rng() * 1800;
-  const candles = [];
-  let price = basePrice;
-  const today = Date.now();
-
-  for (let i = 180; i >= 0; i--) {
-    const d = new Date(today - i * 86400000);
-    const day = d.getDay();
-    if (day === 0 || day === 6) continue; // skip weekends
-    const change = (rng() - 0.48) * price * 0.025;
-    const open  = price;
-    const close = Math.max(10, price + change);
-    const high  = Math.max(open, close) * (1 + rng() * 0.012);
-    const low   = Math.min(open, close) * (1 - rng() * 0.012);
-    const vol   = Math.floor(10000 + rng() * 200000);
-    candles.push({
-      date: d.toLocaleDateString('en-NP', { month: 'short', day: 'numeric' }),
-      open: +open.toFixed(2), high: +high.toFixed(2),
-      low:  +low.toFixed(2), close: +close.toFixed(2), volume: vol
-    });
-    price = close;
-  }
-  return candles;
 }
