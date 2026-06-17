@@ -16,15 +16,17 @@ const fmtK = (n) => n > 1e6 ? (n/1e6).toFixed(1)+'M' : n > 1e3 ? (n/1e3).toFixed
 
 // ─── Fetch from Merolagani (official data source) ─────────────────────────────
 // This is the same endpoint Merolagani uses internally for its charts/AI products.
+// dateRange=20 returns ~376 trading days (~1.5 years), enough for EMA200 approximation,
+// real swing high/low structure, and proper Smart Money Concept analysis.
 async function fetchMerolagani(sym) {
   try {
     const res = await fetch(
-      `https://merolagani.com/handlers/webrequesthandler.ashx?type=get_company_graph&symbol=${sym}&dateRange=1`,
+      `https://merolagani.com/handlers/webrequesthandler.ashx?type=get_company_graph&symbol=${sym}&dateRange=20`,
       { mode: 'cors' }
     );
     if (!res.ok) return null;
     const data = await res.json();
-    if (!data.quotes || data.quotes.length < 20) return null;
+    if (!data.quotes || data.quotes.length < 50) return null;
     return data.quotes.map(q => ({
       date: q.date, open: q.open, high: q.high, low: q.low,
       close: q.close, volume: q.volume || 0
@@ -149,6 +151,182 @@ function detectOrderBlocks(candles) {
   return blocks.filter(b => b.i > candles.length - 60).slice(-6);
 }
 
+// ─── Fair Value Gap (FVG) — 3-candle imbalance pattern ────────────────────────
+// Bullish FVG: candle[i-1].high < candle[i+1].low  (gap up, never filled)
+// Bearish FVG: candle[i-1].low > candle[i+1].high  (gap down, never filled)
+function detectFVGs(candles) {
+  const fvgs = [];
+  for (let i = 1; i < candles.length - 1; i++) {
+    const prev = candles[i - 1], curr = candles[i], next = candles[i + 1];
+    // Bullish FVG
+    if (prev.high < next.low) {
+      const filled = curr.low <= prev.high; // gap was touched
+      fvgs.push({ type: 'bull', i, top: next.low, bottom: prev.high, filled, age: candles.length - i });
+    }
+    // Bearish FVG
+    if (prev.low > next.high) {
+      const filled = curr.high >= prev.low;
+      fvgs.push({ type: 'bear', i, top: prev.low, bottom: next.high, filled, age: candles.length - i });
+    }
+  }
+  // Keep unfilled FVGs from last 60 candles (most relevant)
+  return fvgs.filter(f => !f.filled && f.i > candles.length - 60).slice(-5);
+}
+
+// ─── Swing Highs / Swing Lows (for BOS/CHoCH detection) ──────────────────────
+// A swing high is a candle whose high is higher than N candles on each side
+function detectSwings(candles, lookback = 3) {
+  const swings = [];
+  for (let i = lookback; i < candles.length - lookback; i++) {
+    const highs = candles.slice(i - lookback, i).map(c => c.high).concat(candles.slice(i + 1, i + 1 + lookback).map(c => c.high));
+    const lows = candles.slice(i - lookback, i).map(c => c.low).concat(candles.slice(i + 1, i + 1 + lookback).map(c => c.low));
+    if (candles[i].high === Math.max(...highs, candles[i].high)) {
+      swings.push({ type: 'high', i, price: candles[i].high, confirmed: true });
+    }
+    if (candles[i].low === Math.min(...lows, candles[i].low)) {
+      swings.push({ type: 'low', i, price: candles[i].low, confirmed: true });
+    }
+  }
+  return swings;
+}
+
+// ─── BOS (Break of Structure) + CHoCH (Change of Character) ──────────────────
+// BOS = price breaks prior swing high (bullish continuation) or prior swing low (bearish continuation)
+// CHoCH = first opposite break after an established trend (reversal signal)
+function detectStructure(candles) {
+  const swings = detectSwings(candles, 3);
+  const last20 = swings.slice(-12); // last ~12 swing points
+  const structure = { lastBOS: null, lastCHoCH: null, trend: 'ranging' };
+
+  if (last20.length < 4) return structure;
+
+  // Find trend direction from swing sequence
+  let higherHighs = 0, lowerLows = 0;
+  for (let i = 2; i < last20.length; i++) {
+    if (last20[i].type === 'high' && last20[i - 2].type === 'high') {
+      if (last20[i].price > last20[i - 2].price) higherHighs++;
+      else lowerLows++; // lower highs
+    }
+    if (last20[i].type === 'low' && last20[i - 2].type === 'low') {
+      if (last20[i].price < last20[i - 2].price) lowerLows++;
+    }
+  }
+
+  // Determine current trend
+  if (higherHighs >= 2) structure.trend = 'bullish';
+  else if (lowerLows >= 2) structure.trend = 'bearish';
+
+  // Detect BOS in the last 10 candles
+  const n = candles.length - 1;
+  const recentSwings = last20.filter(s => s.i > n - 15);
+  if (recentSwings.length > 0) {
+    const lastHigh = recentSwings.filter(s => s.type === 'high').pop();
+    const lastLow = recentSwings.filter(s => s.type === 'low').pop();
+    const price = candles[n].close;
+
+    if (lastHigh && price > lastHigh.price) {
+      structure.lastBOS = { type: 'bull', i: n, level: lastHigh.price, time: candles[n].date };
+      // If trend was bearish and we got bullish BOS, it's a CHoCH
+      if (structure.trend === 'bearish') {
+        structure.lastCHoCH = { type: 'bull', i: n, level: lastHigh.price, time: candles[n].date };
+      }
+    }
+    if (lastLow && price < lastLow.price) {
+      structure.lastBOS = { type: 'bear', i: n, level: lastLow.price, time: candles[n].date };
+      if (structure.trend === 'bullish') {
+        structure.lastCHoCH = { type: 'bear', i: n, level: lastLow.price, time: candles[n].date };
+      }
+    }
+  }
+
+  return structure;
+}
+
+// ─── Liquidity Sweep (stop-hunt) detection ───────────────────────────────────
+// A liquidity sweep occurs when price wicks above a prior swing high (or below prior swing low)
+// but CLOSES back inside the range — trapping breakout traders and reversing.
+function detectLiquiditySweeps(candles) {
+  const swings = detectSwings(candles, 3);
+  const sweeps = [];
+  const recentSwings = swings.filter(s => s.i > candles.length - 30);
+  const n = candles.length - 1;
+
+  // Check last 5 candles for sweeps
+  for (let i = Math.max(0, n - 5); i <= n; i++) {
+    const c = candles[i];
+    // Bullish liquidity sweep: wick below prior swing low, close back above
+    const priorLows = recentSwings.filter(s => s.type === 'low' && s.i < i);
+    if (priorLows.length > 0) {
+      const nearestLow = priorLows[priorLows.length - 1];
+      if (c.low < nearestLow.price && c.close > nearestLow.price) {
+        sweeps.push({ type: 'bull', i, swept: nearestLow.price, close: c.close, time: c.date });
+      }
+    }
+    // Bearish liquidity sweep: wick above prior swing high, close back below
+    const priorHighs = recentSwings.filter(s => s.type === 'high' && s.i < i);
+    if (priorHighs.length > 0) {
+      const nearestHigh = priorHighs[priorHighs.length - 1];
+      if (c.high > nearestHigh.price && c.close < nearestHigh.price) {
+        sweeps.push({ type: 'bear', i, swept: nearestHigh.price, close: c.close, time: c.date });
+      }
+    }
+  }
+  return sweeps.slice(-3);
+}
+
+// ─── Premium / Discount zones (SMC: only buy in discount, sell in premium) ────
+// Divide the current dealing range (last swing high to last swing low) in half.
+// Upper half = Premium (sell zone), Lower half = Discount (buy zone).
+function calcPremiumDiscount(candles) {
+  const swings = detectSwings(candles, 3);
+  const recent = swings.slice(-8);
+  if (recent.length < 2) return { premium: null, discount: null, eq: null, rangeHigh: null, rangeLow: null };
+  const highs = recent.filter(s => s.type === 'high').map(s => s.price);
+  const lows = recent.filter(s => s.type === 'low').map(s => s.price);
+  const rangeHigh = Math.max(...highs);
+  const rangeLow = Math.min(...lows);
+  const eq = (rangeHigh + rangeLow) / 2; // Equilibrium / 50% level
+  return {
+    rangeHigh, rangeLow, eq,
+    premium: [eq, rangeHigh],   // upper half
+    discount: [rangeLow, eq]    // lower half
+  };
+}
+
+// ─── Candlestick pattern recognition at key zones ────────────────────────────
+function detectCandlePatterns(candles) {
+  const n = candles.length - 1;
+  const c = candles[n], prev = candles[n - 1];
+  if (!prev) return [];
+  const patterns = [];
+  const body = Math.abs(c.close - c.open);
+  const range = c.high - c.low;
+  const upperWick = c.high - Math.max(c.open, c.close);
+  const lowerWick = Math.min(c.open, c.close) - c.low;
+
+  // Bullish pin bar (hammer): long lower wick, small body
+  if (lowerWick > body * 2 && upperWick < body * 0.5) {
+    patterns.push({ type: 'bullish_pin', name: 'Bullish Pin Bar (Hammer)', bias: 'bull', i: n });
+  }
+  // Bearish pin bar (shooting star): long upper wick, small body
+  if (upperWick > body * 2 && lowerWick < body * 0.5) {
+    patterns.push({ type: 'bearish_pin', name: 'Bearish Pin Bar (Shooting Star)', bias: 'bear', i: n });
+  }
+  // Bullish engulfing
+  if (prev.close < prev.open && c.close > c.open && c.close > prev.open && c.open < prev.close) {
+    patterns.push({ type: 'bullish_engulf', name: 'Bullish Engulfing', bias: 'bull', i: n });
+  }
+  // Bearish engulfing
+  if (prev.close > prev.open && c.close < c.open && c.close < prev.open && c.open > prev.close) {
+    patterns.push({ type: 'bearish_engulf', name: 'Bearish Engulfing', bias: 'bear', i: n });
+  }
+  // Doji (indecision)
+  if (body < range * 0.1) {
+    patterns.push({ type: 'doji', name: 'Doji (Indecision)', bias: 'neutral', i: n });
+  }
+  return patterns;
+}
+
 // ─── Breakout vs Retracement buy classifier (Merolagani's exact methodology) ──
 function classifyBuyType(candles, support, resistance, price) {
   const n = candles.length - 1;
@@ -201,34 +379,42 @@ function simulateVerification(sig) {
 
 // ─── Main analyzer — full Merolagani TA toolset ───────────────────────────────
 function analyze(candles, sym) {
-  if (!candles || candles.length < 20) return null;
+  if (!candles || candles.length < 50) return null;
   const C = candles.map(c => c.close), H = candles.map(c => c.high),
         L = candles.map(c => c.low),   V = candles.map(c => c.volume || 0);
   const n = candles.length - 1;
 
   const rsi = calcRSI(C);
   const stochRsi = calcStochRSI(rsi);
-  const ema10 = calcEMA(C, 10), ema20 = calcEMA(C, 20), ema50 = calcEMA(C, 50);
+  const ema10 = calcEMA(C, 10), ema20 = calcEMA(C, 20), ema50 = calcEMA(C, 50),
+        ema200 = C.length >= 200 ? calcEMA(C, 200) : null;
   const { ml: macdLine, sg: macdSig, hist: macdHist } = calcMACD(C);
   const atr = calcATR(H, L, C);
   const bb = calcBB(C);
   const fib = calcFibLevels(candles);
   const pivots = calcPivots(candles);
+  // Smart Money Concept components
   const orderBlocks = detectOrderBlocks(candles);
+  const fvgs = detectFVGs(candles);
+  const structure = detectStructure(candles);
+  const liquiditySweeps = detectLiquiditySweeps(candles);
+  const premDisc = calcPremiumDiscount(candles);
+  const candlePatterns = detectCandlePatterns(candles);
 
   const price = C[n], prevClose = C[n - 1];
   const rsiV = rsi[n], stochRsiV = stochRsi[n];
-  const e10 = ema10[n], e20 = ema20[n], e50 = ema50[n];
+  const e10 = ema10[n], e20 = ema20[n], e50 = ema50[n],
+        e200 = ema200 ? ema200[n] : null;
   const macd = macdLine[n], msig = macdSig[n], mhist = macdHist[n], mhistP = macdHist[n - 1];
   const bbV = bb[n];
   const atrV = atr[n] || price * 0.02;
   const avgVol = V.slice(-20).reduce((a, b) => a + b, 0) / 20;
   const lastVol = V[n];
-  const resistance = Math.max(...H.slice(Math.max(0, n - 15), n));
-  const support = Math.min(...L.slice(Math.max(0, n - 15), n));
+  const resistance = Math.max(...H.slice(Math.max(0, n - 60), n));  // 60-day high (real S/R)
+  const support = Math.min(...L.slice(Math.max(0, n - 60), n));      // 60-day low (real S/R)
   const change = prevClose ? ((price - prevClose) / prevClose * 100) : 0;
 
-  // ─── Scoring engine (Merolagani's multi-parameter approach) ───────────────────
+  // ─── Scoring engine (Merolagani's multi-parameter approach + full SMC) ──────
   let score = 0; const reasons = [];
 
   // 1. Trend structure (EMA alignment — Advanced Price Action)
@@ -237,6 +423,11 @@ function analyze(candles, sym) {
     else if (price < e20 && e20 < e50) { score -= 2; reasons.push('Price < EMA20 < EMA50 — Bearish structure'); }
     else if (price > e50) { score += 1; reasons.push('Price above EMA50'); }
     else { score -= 1; reasons.push('Price below EMA50'); }
+  }
+  // 1b. EMA200 trend filter (long-term trend)
+  if (e200) {
+    if (price > e200) { score += 1; reasons.push(`Price above EMA200 (${fmt(e200)}) — long-term bullish`); }
+    else { score -= 1; reasons.push(`Price below EMA200 (${fmt(e200)}) — long-term bearish`); }
   }
   // 2. RSI (14)
   if (rsiV != null) {
@@ -268,9 +459,9 @@ function analyze(candles, sym) {
   // 6. Volume (Merolagani's verification indicator)
   if (lastVol > avgVol * 1.5) { score += (score > 0 ? 1 : -1); reasons.push(`High volume ${fmtK(lastVol)} confirms move (avg ${fmtK(avgVol)})`); }
   else if (lastVol < avgVol * 0.5) { reasons.push('Low volume — weak conviction'); }
-  // 7. S/R proximity (Advanced Price Action zones)
-  if (((price - support) / price) * 100 < 2.5) { score += 1; reasons.push(`Near demand zone Rs ${fmt(support)}`); }
-  if (((resistance - price) / price) * 100 < 2.5) { score -= 1; reasons.push(`Near supply zone Rs ${fmt(resistance)}`); }
+  // 7. S/R proximity (Advanced Price Action zones — now using 60-day real S/R)
+  if (((price - support) / price) * 100 < 5) { score += 1; reasons.push(`Near 60-day demand zone Rs ${fmt(support)}`); }
+  if (((resistance - price) / price) * 100 < 5) { score -= 1; reasons.push(`Near 60-day supply zone Rs ${fmt(resistance)}`); }
   // 8. SMC order block confluence (Smart Money Concept)
   if (orderBlocks.length > 0) {
     const last = orderBlocks[orderBlocks.length - 1];
@@ -279,6 +470,57 @@ function analyze(candles, sym) {
     }
     if (last.type === 'bear' && price <= last.high && price >= last.low * 0.99) {
       score -= 1; reasons.push('Bearish SMC order block overhead');
+    }
+  }
+  // 8b. Fair Value Gap (FVG) — SMC imbalance
+  if (fvgs.length > 0) {
+    const lastFVG = fvgs[fvgs.length - 1];
+    if (lastFVG.type === 'bull' && price >= lastFVG.bottom && price <= lastFVG.top * 1.005) {
+      score += 1; reasons.push(`Price tapping bullish FVG ${fmt(lastFVG.bottom)}–${fmt(lastFVG.top)}`);
+    }
+    if (lastFVG.type === 'bear' && price <= lastFVG.top && price >= lastFVG.bottom * 0.995) {
+      score -= 1; reasons.push(`Price tapping bearish FVG ${fmt(lastFVG.bottom)}–${fmt(lastFVG.top)}`);
+    }
+  }
+  // 8c. BOS / CHoCH — market structure
+  if (structure.lastCHoCH) {
+    if (structure.lastCHoCH.type === 'bull') {
+      score += 2; reasons.push(`Bullish CHoCH at ${fmt(structure.lastCHoCH.level)} — reversal up`);
+    } else {
+      score -= 2; reasons.push(`Bearish CHoCH at ${fmt(structure.lastCHoCH.level)} — reversal down`);
+    }
+  } else if (structure.lastBOS) {
+    if (structure.lastBOS.type === 'bull') {
+      score += 1; reasons.push(`Bullish BOS at ${fmt(structure.lastBOS.level)} — continuation up`);
+    } else {
+      score -= 1; reasons.push(`Bearish BOS at ${fmt(structure.lastBOS.level)} — continuation down`);
+    }
+  }
+  if (structure.trend === 'bullish') { reasons.push('SMC structure: higher highs / higher lows (bullish trend)'); }
+  else if (structure.trend === 'bearish') { reasons.push('SMC structure: lower highs / lower lows (bearish trend)'); }
+  // 8d. Liquidity sweep (stop-hunt — strong reversal signal)
+  if (liquiditySweeps.length > 0) {
+    const lastSweep = liquiditySweeps[liquiditySweeps.length - 1];
+    if (lastSweep.type === 'bull') {
+      score += 2; reasons.push(`Bullish liquidity sweep below ${fmt(lastSweep.swept)} — stop-hunt reversal`);
+    } else {
+      score -= 2; reasons.push(`Bearish liquidity sweep above ${fmt(lastSweep.swept)} — stop-hunt reversal`);
+    }
+  }
+  // 8e. Premium / Discount zone filter (SMC: only buy in discount, sell in premium)
+  if (premDisc.eq) {
+    if (price < premDisc.eq) {
+      score += 1; reasons.push(`Price in DISCOUNT zone (below EQ ${fmt(premDisc.eq)}) — buy-side`);
+    } else {
+      score -= 1; reasons.push(`Price in PREMIUM zone (above EQ ${fmt(premDisc.eq)}) — sell-side`);
+    }
+  }
+  // 8f. Candlestick patterns at key levels
+  if (candlePatterns.length > 0) {
+    for (const p of candlePatterns) {
+      if (p.bias === 'bull') { score += 1; reasons.push(`Candle pattern: ${p.name}`); }
+      else if (p.bias === 'bear') { score -= 1; reasons.push(`Candle pattern: ${p.name}`); }
+      else { reasons.push(`Candle pattern: ${p.name}`); }
     }
   }
   // 9. Fibonacci retracement levels (Advanced Price Action)
@@ -327,8 +569,10 @@ function analyze(candles, sym) {
 
   return {
     sym, action, color, score, reasons,
-    price, change, rsiV, stochRsiV, e10, e20, e50, atrV, bbU: bbV.u, bbL: bbV.l, fib, pivots,
-    marketStage, support, resistance, orderBlocks, buyType,
+    price, change, rsiV, stochRsiV, e10, e20, e50, e200, atrV, bbU: bbV.u, bbL: bbV.l, fib, pivots,
+    macd, msig, mhist,
+    marketStage, support, resistance, orderBlocks, fvgs, structure, liquiditySweeps, premDisc, candlePatterns,
+    buyType,
     demandZone: [demandLow, demandHigh], supplyZone: [supplyLow, supplyHigh],
     buyingZone: [buyZoneLow, buyZoneHigh],
     stopLoss, target1, target2, rr,
@@ -339,11 +583,13 @@ function analyze(candles, sym) {
 // ─── Candlestick Chart with all SMC zones ─────────────────────────────────────
 function CandleChart({ sig }) {
   if (!sig?.candles) return null;
-  const { candles, stopLoss, target1, target2, buyingZone, demandZone, supplyZone, orderBlocks } = sig;
-  const W = 880, H = 340, P = { t: 14, r: 72, b: 32, l: 56 };
-  const disp = candles.slice(-60);
+  const { candles, stopLoss, target1, target2, buyingZone, demandZone, supplyZone,
+          orderBlocks, fvgs, structure, liquiditySweeps, premDisc, e200 } = sig;
+  const W = 880, H = 380, P = { t: 14, r: 80, b: 32, l: 56 };
+  const disp = candles.slice(-90);  // show last 90 candles for more context
   const closes = candles.map(c => c.close);
-  const ema20f = calcEMA(closes, 20), ema50f = calcEMA(closes, 50);
+  const ema20f = calcEMA(closes, 20), ema50f = calcEMA(closes, 50),
+        ema200f = closes.length >= 200 ? calcEMA(closes, 200) : null;
   const start = candles.length - disp.length;
   const hs = disp.map(c => c.high), ls = disp.map(c => c.low);
 
@@ -354,12 +600,22 @@ function CandleChart({ sig }) {
   const cw = W - P.l - P.r, ch = H - P.t - P.b;
   const xS = i => P.l + (i / (disp.length - 1)) * cw;
   const yS = p => P.t + ch - ((p - mn) / (mx - mn)) * ch;
-  const bw = Math.max(2, Math.floor(cw / disp.length) - 2);
+  const bw = Math.max(2, Math.floor(cw / disp.length) - 1);
   const lp = (v, f) => v.slice(f).map((x, i) => x != null ? `${xS(i)},${yS(x)}` : null).filter(Boolean).join(' ');
 
+  // Map SMC features into display coordinate space
   const visibleBlocks = orderBlocks.filter(b => b.i >= start).map(b => ({
     x: xS(b.i - start), y: yS(b.high), w: bw * 2, h: yS(b.low) - yS(b.high),
     type: b.type, valid: b.valid
+  }));
+  const visibleFVGs = fvgs.filter(f => f.i >= start).map(f => {
+    // FVG spans from candle f.i-1 to f.i+1
+    const x1 = xS(Math.max(0, f.i - 1 - start));
+    const x2 = xS(Math.min(disp.length - 1, f.i + 1 - start));
+    return { x: x1, w: x2 - x1, top: yS(f.top), bottom: yS(f.bottom), type: f.type };
+  });
+  const visibleSweeps = liquiditySweeps.filter(s => s.i >= start).map(s => ({
+    x: xS(s.i - start), type: s.type, swept: s.swept, ySwept: yS(s.swept)
   }));
 
   const gL = Array.from({ length: 6 }, (_, i) => ({ y: yS(mn + (mx - mn) * i / 5), p: mn + (mx - mn) * i / 5 }));
@@ -369,7 +625,25 @@ function CandleChart({ sig }) {
     { p: target2,   c: '#1abc9c', lb: `T2 ${fmt(target2)}`,   d: '2,2' },
     { p: buyingZone[0], c: '#f39c12', lb: `BZ ${fmt(buyingZone[0])}`, d: '3,3' }
   ].filter(x => x.p != null && x.p > mn && x.p < mx);
-  const step = Math.max(1, Math.floor(disp.length / 7));
+
+  // BOS / CHoCH line
+  const structureLine = structure.lastBOS ? {
+    p: structure.lastBOS.level,
+    c: structure.lastCHoCH ? '#fbbf24' : '#06b6d4',
+    lb: `${structure.lastCHoCH ? 'CHoCH' : 'BOS'} ${fmt(structure.lastBOS.level)}`,
+    d: '5,5'
+  } : null;
+
+  // Premium/Discount equilibrium line
+  const eqLine = premDisc.eq && premDisc.eq > mn && premDisc.eq < mx ? {
+    p: premDisc.eq, c: '#94a3b8', lb: `EQ ${fmt(premDisc.eq)}`, d: '1,3'
+  } : null;
+
+  const allLines = [...hLines];
+  if (structureLine) allLines.push(structureLine);
+  if (eqLine) allLines.push(eqLine);
+
+  const step = Math.max(1, Math.floor(disp.length / 8));
   const dL = disp.map((c, i) => ({ i, d: c.date })).filter((_, i) => i % step === 0);
 
   return (
@@ -377,18 +651,42 @@ function CandleChart({ sig }) {
       <rect width={W} height={H} fill="#0f172a" />
       <rect x={P.l} y={P.t} width={cw} height={ch} fill="#0c1428" rx="2" />
 
+      {/* Premium zone shading (upper half — sell side) */}
+      {premDisc.eq && premDisc.eq > mn && premDisc.eq < mx && premDisc.rangeHigh <= mx && (
+        <rect x={P.l} y={yS(premDisc.rangeHigh)} width={cw}
+              height={Math.max(1, yS(premDisc.eq) - yS(premDisc.rangeHigh))}
+              fill="rgba(231,76,60,0.04)" />
+      )}
+      {/* Discount zone shading (lower half — buy side) */}
+      {premDisc.eq && premDisc.eq > mn && premDisc.eq < mx && premDisc.rangeLow >= mn && (
+        <rect x={P.l} y={yS(premDisc.eq)} width={cw}
+              height={Math.max(1, yS(premDisc.rangeLow) - yS(premDisc.eq))}
+              fill="rgba(39,174,96,0.04)" />
+      )}
+
+      {/* Demand zone */}
       <rect x={P.l} y={yS(demandZone[1])} width={cw} height={Math.max(1, yS(demandZone[0]) - yS(demandZone[1]))} fill="rgba(39,174,96,0.08)" />
       <line x1={P.l} y1={yS(demandZone[1])} x2={P.l+cw} y2={yS(demandZone[1])} stroke="#27ae60" strokeWidth="0.5" strokeDasharray="2,4" opacity="0.6" />
       <line x1={P.l} y1={yS(demandZone[0])} x2={P.l+cw} y2={yS(demandZone[0])} stroke="#27ae60" strokeWidth="0.5" strokeDasharray="2,4" opacity="0.6" />
 
+      {/* Supply zone */}
       <rect x={P.l} y={yS(supplyZone[1])} width={cw} height={Math.max(1, yS(supplyZone[0]) - yS(supplyZone[1]))} fill="rgba(231,76,60,0.08)" />
       <line x1={P.l} y1={yS(supplyZone[1])} x2={P.l+cw} y2={yS(supplyZone[1])} stroke="#e74c3c" strokeWidth="0.5" strokeDasharray="2,4" opacity="0.6" />
       <line x1={P.l} y1={yS(supplyZone[0])} x2={P.l+cw} y2={yS(supplyZone[0])} stroke="#e74c3c" strokeWidth="0.5" strokeDasharray="2,4" opacity="0.6" />
 
-      {visibleBlocks.map((b, i) => (
-        <rect key={i} x={b.x - b.w/2} y={b.y} width={b.w} height={Math.abs(b.h)} fill={b.type==='bull'?'rgba(16,185,129,0.22)':'rgba(239,68,68,0.22)'} stroke={b.type==='bull'?'#10b981':'#ef4444'} strokeWidth="0.6" strokeDasharray="3,2" opacity={b.valid?0.85:0.4}/>
+      {/* FVGs */}
+      {visibleFVGs.map((f, i) => (
+        <rect key={`fvg${i}`} x={f.x} y={f.top} width={f.w} height={Math.max(1, f.bottom - f.top)}
+              fill={f.type === 'bull' ? 'rgba(96,165,250,0.18)' : 'rgba(251,113,133,0.18)'}
+              stroke={f.type === 'bull' ? '#60a5fa' : '#fb7185'} strokeWidth="0.4" strokeDasharray="1,2" />
       ))}
 
+      {/* Order blocks */}
+      {visibleBlocks.map((b, i) => (
+        <rect key={`ob${i}`} x={b.x - b.w/2} y={b.y} width={b.w} height={Math.abs(b.h)} fill={b.type==='bull'?'rgba(16,185,129,0.22)':'rgba(239,68,68,0.22)'} stroke={b.type==='bull'?'#10b981':'#ef4444'} strokeWidth="0.6" strokeDasharray="3,2" opacity={b.valid?0.85:0.4}/>
+      ))}
+
+      {/* Grid */}
       {gL.map(({ y, p }) => (
         <g key={p}>
           <line x1={P.l} y1={y} x2={P.l + cw} y2={y} stroke="#1e293b" strokeWidth="1" />
@@ -396,9 +694,12 @@ function CandleChart({ sig }) {
         </g>
       ))}
 
+      {/* EMAs */}
       <polyline points={lp(ema20f, start)} fill="none" stroke="#3b82f6" strokeWidth="1.3" opacity="0.85" />
       <polyline points={lp(ema50f, start)} fill="none" stroke="#a855f7" strokeWidth="1.3" opacity="0.85" />
+      {ema200f && <polyline points={lp(ema200f, start)} fill="none" stroke="#f59e0b" strokeWidth="1.5" opacity="0.9" />}
 
+      {/* Candles */}
       {disp.map((c, i) => {
         const x = xS(i), isUp = c.close >= c.open;
         const col = isUp ? '#27ae60' : '#e74c3c';
@@ -412,12 +713,22 @@ function CandleChart({ sig }) {
         );
       })}
 
-      {hLines.map(({ p, c, lb, d }) => {
+      {/* Liquidity sweep markers */}
+      {visibleSweeps.map((s, i) => (
+        <g key={`sw${i}`}>
+          <circle cx={s.x} cy={s.ySwept} r="4" fill="none"
+                  stroke={s.type === 'bull' ? '#10b981' : '#ef4444'} strokeWidth="1.5" />
+          <text x={s.x + 6} y={s.ySwept - 4} fill={s.type === 'bull' ? '#10b981' : '#ef4444'} fontSize="8" fontFamily="monospace">SW</text>
+        </g>
+      ))}
+
+      {/* All horizontal lines (SL, T1, T2, BZ, BOS/CHoCH, EQ) */}
+      {allLines.map(({ p, c, lb, d }) => {
         const y = yS(p);
         return (
           <g key={lb}>
             <line x1={P.l} y1={y} x2={P.l + cw} y2={y} stroke={c} strokeWidth="1.2" strokeDasharray={d} opacity="0.9" />
-            <rect x={P.l + cw + 2} y={y - 8} width={58} height={14} fill="#0f172a" />
+            <rect x={P.l + cw + 2} y={y - 8} width={70} height={14} fill="#0f172a" />
             <text x={P.l + cw + 4} y={y + 3} fill={c} fontSize="8.5" fontFamily="monospace">{lb}</text>
           </g>
         );
@@ -427,17 +738,24 @@ function CandleChart({ sig }) {
         <text key={i} x={xS(i)} y={H - 4} textAnchor="middle" fill="#64748b" fontSize="8.5" fontFamily="monospace">{d}</text>
       ))}
 
-      <rect x={P.l + 6} y={P.t + 5} width={320} height={28} fill="rgba(15,23,42,0.9)" rx="2" />
+      {/* Legend */}
+      <rect x={P.l + 6} y={P.t + 5} width={465} height={20} fill="rgba(15,23,42,0.9)" rx="2" />
       <line x1={P.l + 13} y1={P.t + 16} x2={P.l + 23} y2={P.t + 16} stroke="#3b82f6" strokeWidth="1.5" />
       <text x={P.l + 27} y={P.t + 20} fill="#3b82f6" fontSize="9" fontFamily="monospace">EMA20</text>
       <line x1={P.l + 75} y1={P.t + 16} x2={P.l + 85} y2={P.t + 16} stroke="#a855f7" strokeWidth="1.5" />
       <text x={P.l + 89} y={P.t + 20} fill="#a855f7" fontSize="9" fontFamily="monospace">EMA50</text>
-      <rect x={P.l + 135} y={P.t + 10} width={9} height={7} fill="rgba(39,174,96,0.4)" stroke="#27ae60" strokeWidth="0.5" />
-      <text x={P.l + 148} y={P.t + 20} fill="#27ae60" fontSize="9" fontFamily="monospace">Demand</text>
-      <rect x={P.l + 195} y={P.t + 10} width={9} height={7} fill="rgba(231,76,60,0.4)" stroke="#e74c3c" strokeWidth="0.5" />
-      <text x={P.l + 208} y={P.t + 20} fill="#e74c3c" fontSize="9" fontFamily="monospace">Supply</text>
-      <rect x={P.l + 250} y={P.t + 10} width={9} height={7} fill="rgba(16,185,129,0.3)" stroke="#10b981" strokeWidth="0.5" strokeDasharray="2,1" />
-      <text x={P.l + 263} y={P.t + 20} fill="#10b981" fontSize="9" fontFamily="monospace">SMC OB</text>
+      {ema200f && <>
+        <line x1={P.l + 135} y1={P.t + 16} x2={P.l + 145} y2={P.t + 16} stroke="#f59e0b" strokeWidth="1.5" />
+        <text x={P.l + 149} y={P.t + 20} fill="#f59e0b" fontSize="9" fontFamily="monospace">EMA200</text>
+      </>}
+      <rect x={P.l + 200} y={P.t + 12} width={9} height={7} fill="rgba(96,165,250,0.3)" stroke="#60a5fa" strokeWidth="0.5" strokeDasharray="1,1" />
+      <text x={P.l + 213} y={P.t + 20} fill="#60a5fa" fontSize="9" fontFamily="monospace">FVG</text>
+      <rect x={P.l + 245} y={P.t + 12} width={9} height={7} fill="rgba(16,185,129,0.3)" stroke="#10b981" strokeWidth="0.5" strokeDasharray="2,1" />
+      <text x={P.l + 258} y={P.t + 20} fill="#10b981" fontSize="9" fontFamily="monospace">OB</text>
+      <circle cx={P.l + 290} cy={P.t + 16} r="3.5" fill="none" stroke="#06b6d4" strokeWidth="1.2" />
+      <text x={P.l + 298} y={P.t + 20} fill="#06b6d4" fontSize="9" fontFamily="monospace">Liq Sweep</text>
+      <line x1={P.l + 360} y1={P.t + 16} x2={P.l + 370} y2={P.t + 16} stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="5,5" />
+      <text x={P.l + 374} y={P.t + 20} fill="#fbbf24" fontSize="9" fontFamily="monospace">BOS/CHoCH</text>
     </svg>
   );
 }
@@ -445,7 +763,7 @@ function CandleChart({ sig }) {
 function VolChart({ sig }) {
   if (!sig?.candles) return null;
   const W = 880, H = 50, P = { t: 4, r: 72, b: 10, l: 56 };
-  const d = sig.candles.slice(-60);
+  const d = sig.candles.slice(-90);
   const mx = Math.max(...d.map(c => c.volume || 1));
   const cw = W - P.l - P.r, ch = H - P.t - P.b;
   const bw = Math.max(1, Math.floor(cw / d.length) - 1);
@@ -472,12 +790,20 @@ function SR({ label, value, vc, bold }) {
 }
 
 function StratPanel({ sig }) {
-  const { action, price, stopLoss, target1, target2, buyingZone, demandZone, supplyZone, rr, marketStage, rsiV, stochRsiV, score, lastVol, avgVol, buyType, fib, pivots } = sig;
+  const { action, price, stopLoss, target1, target2, buyingZone, demandZone, supplyZone, rr,
+          marketStage, rsiV, stochRsiV, score, lastVol, avgVol, buyType, fib, pivots,
+          e200, e50, e20, fvgs, structure, liquiditySweeps, premDisc, candlePatterns, macd: macdV, msig: msigV } = sig;
   const isB = action === 'BUY', isS = action === 'SELL';
   const hdrBg = isB ? '#1a7a4a' : isS ? '#c0392b' : '#e67e22';
   const strat = isB ? 'WAIT AND BUY' : isS ? 'WAIT AND SELL' : 'WAIT AND WATCH';
   const sc = marketStage.includes('Up') || marketStage.includes('Acc') ? '#166534'
            : marketStage.includes('Down') || marketStage.includes('Dist') ? '#991b1b' : '#92400e';
+
+  const lastFVG = fvgs.length > 0 ? fvgs[fvgs.length - 1] : null;
+  const lastSweep = liquiditySweeps.length > 0 ? liquiditySweeps[liquiditySweeps.length - 1] : null;
+  const lastPattern = candlePatterns.length > 0 ? candlePatterns[candlePatterns.length - 1] : null;
+  const macdHist = (macdV != null && msigV != null) ? macdV - msigV : null;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '260px' }}>
       <div style={{ border: '1px solid #cbd5e1', borderRadius: '4px', overflow: 'hidden', background: '#fff' }}>
@@ -491,6 +817,11 @@ function StratPanel({ sig }) {
           {isB && <><SR label="Immediate Demand Zone" value={`${fmt(demandZone[0])} – ${fmt(demandZone[1])}`} vc="#166534" /><SR label="Immediate Supply Zone" value={`${fmt(supplyZone[0])} – ${fmt(supplyZone[1])}`} vc="#991b1b" /></>}
           {isS && <><SR label="Immediate Supply Zone" value={`${fmt(supplyZone[0])} – ${fmt(supplyZone[1])}`} vc="#991b1b" /><SR label="Immediate Demand Zone" value={`${fmt(demandZone[0])} – ${fmt(demandZone[1])}`} vc="#166534" /></>}
           {!isB && !isS && <><SR label="Demand Zone" value={`${fmt(demandZone[0])} – ${fmt(demandZone[1])}`} vc="#166534" /><SR label="Supply Zone" value={`${fmt(supplyZone[0])} – ${fmt(supplyZone[1])}`} vc="#991b1b" /></>}
+          {premDisc.eq && (
+            <SR label="Premium / Discount"
+                value={price < premDisc.eq ? `DISCOUNT (below EQ ${fmt(premDisc.eq)})` : `PREMIUM (above EQ ${fmt(premDisc.eq)})`}
+                vc={price < premDisc.eq ? '#166534' : '#991b1b'} />
+          )}
           {isB && buyType && (
             <div style={{ marginTop: '6px', padding: '6px 8px', background: `${buyType.color}15`, border: `1px solid ${buyType.color}`, borderRadius: '3px' }}>
               <div style={{ fontSize: '0.65rem', fontWeight: 700, color: buyType.color, letterSpacing: '0.08em' }}>BUY TYPE: {buyType.type}</div>
@@ -513,14 +844,27 @@ function StratPanel({ sig }) {
           <div key={a} style={{ flex: 1, padding: '8px 0', textAlign: 'center', background: action === a ? c : '#f8fafc', color: action === a ? '#fff' : c, fontWeight: 700, fontSize: '0.82rem', borderRight: '1px solid #cbd5e1' }}>{a}</div>
         ))}
       </div>
+
+      {/* Smart Money Concept panel */}
+      <div style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '8px 12px' }}>
+        <div style={{ fontSize: '0.65rem', color: '#0e7490', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px', fontWeight: 700 }}>Smart Money Concept</div>
+        <SR label="SMC Trend" value={structure.trend} vc={structure.trend === 'bullish' ? '#166534' : structure.trend === 'bearish' ? '#991b1b' : '#64748b'} />
+        <SR label="BOS / CHoCH" value={structure.lastCHoCH ? `${structure.lastCHoCH.type === 'bull' ? 'Bullish' : 'Bearish'} CHoCH @ ${fmt(structure.lastCHoCH.level)}` : structure.lastBOS ? `${structure.lastBOS.type === 'bull' ? 'Bullish' : 'Bearish'} BOS @ ${fmt(structure.lastBOS.level)}` : 'None (ranging)'} vc={structure.lastCHoCH ? '#fbbf24' : structure.lastBOS ? '#06b6d4' : '#64748b'} />
+        <SR label="Order Block" value={sig.orderBlocks.length > 0 ? `${sig.orderBlocks[sig.orderBlocks.length - 1].type === 'bull' ? 'Bullish' : 'Bearish'} @ ${fmt(sig.orderBlocks[sig.orderBlocks.length - 1].low)}–${fmt(sig.orderBlocks[sig.orderBlocks.length - 1].high)}` : 'None detected'} vc={sig.orderBlocks.length > 0 ? (sig.orderBlocks[sig.orderBlocks.length - 1].type === 'bull' ? '#166534' : '#991b1b') : '#64748b'} />
+        <SR label="Fair Value Gap" value={lastFVG ? `${lastFVG.type === 'bull' ? 'Bullish' : 'Bearish'} FVG ${fmt(lastFVG.bottom)}–${fmt(lastFVG.top)}` : 'None (all filled)'} vc={lastFVG ? (lastFVG.type === 'bull' ? '#3b82f6' : '#fb7185') : '#64748b'} />
+        <SR label="Liquidity Sweep" value={lastSweep ? `${lastSweep.type === 'bull' ? 'Bullish' : 'Bearish'} sweep @ ${fmt(lastSweep.swept)}` : 'None'} vc={lastSweep ? (lastSweep.type === 'bull' ? '#166534' : '#991b1b') : '#64748b'} />
+        <SR label="Candle Pattern" value={lastPattern ? lastPattern.name : 'None'} vc={lastPattern ? (lastPattern.bias === 'bull' ? '#166534' : lastPattern.bias === 'bear' ? '#991b1b' : '#64748b') : '#64748b'} />
+      </div>
+
+      {/* Indicator panel */}
       <div style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '8px 12px' }}>
         <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px' }}>Indicators (Merolagani TA Toolset)</div>
         <SR label="RSI (14)" value={fmt(rsiV)} vc={rsiV < 35 ? '#166534' : rsiV > 65 ? '#991b1b' : '#92400e'} />
         <SR label="Stochastic RSI" value={stochRsiV != null ? `${(stochRsiV*100).toFixed(1)}%` : '—'} vc={stochRsiV != null && stochRsiV < 0.2 ? '#166534' : stochRsiV != null && stochRsiV > 0.8 ? '#991b1b' : '#92400e'} />
-        <SR label="MACD Hist" value={fmt(sig.candles ? (sig.verification ? sig.sym : sig.sym) : 0)} vc="#475569" />
+        <SR label="MACD Hist" value={macdHist != null ? fmt(macdHist) : '—'} vc={macdHist != null && macdHist > 0 ? '#166534' : macdHist != null && macdHist < 0 ? '#991b1b' : '#475569'} />
+        <SR label="EMA20 / EMA50 / EMA200" value={`${e20 ? fmt(e20) : '—'} / ${e50 ? fmt(e50) : '—'} / ${e200 ? fmt(e200) : '—'}`} vc="#475569" />
         <SR label="Volume" value={fmtK(lastVol)} vc={lastVol > avgVol * 1.3 ? '#166534' : '#64748b'} />
-        <SR label="Fib 61.8% (Support)" value={fmt(fib[0.618])} vc="#166534" />
-        <SR label="Fib 38.2% (Resistance)" value={fmt(fib[0.382])} vc="#991b1b" />
+        <SR label="Fib 61.8% / 38.2%" value={`${fmt(fib[0.618])} / ${fmt(fib[0.382])}`} vc="#475569" />
         <SR label="Pivot Point" value={fmt(pivots.PP)} vc="#475569" />
         <SR label="Signal Score" value={`${score > 0 ? '+' : ''}${score}`} vc={isB ? '#166534' : isS ? '#991b1b' : '#92400e'} />
       </div>
@@ -579,7 +923,7 @@ function DetailView({ sig, onBack }) {
       <div className="dv-grid">
         <div className="dv-chart-wrap">
           <div className="dv-chart-header">
-            {sig.sym} · Daily · EMA20 · EMA50 · SMC Zones · Demand/Supply · Fib Levels
+            {sig.sym} · Daily · EMA20/50/200 · Demand/Supply · FVG · Order Blocks · BOS/CHoCH · Liquidity Sweeps · Premium/Discount
           </div>
           <CandleChart sig={sig} />
           <VolChart sig={sig} />
@@ -668,26 +1012,27 @@ function AccuracyTracker() {
 // ─── Pre-scan state (before user clicks Scan) ─────────────────────────────────
 function PreScanState({ onScan, totalStocks }) {
   const tools = [
-    { icon: <Layers size={14} />, name: 'Advanced Price Action', desc: 'Support/Resistance, Demand/Supply zones, Bollinger Bands' },
-    { icon: <Layers size={14} />, name: 'Smart Money Concept', desc: 'Order block detection, liquidity zones, market structure' },
-    { icon: <BarChart3 size={14} />, name: 'Volume Analysis', desc: 'Volume confirmation vs 20-day average' },
-    { icon: <Activity size={14} />, name: 'MACD', desc: '12/26 EMA crossover with 9-period signal' },
-    { icon: <TrendingUp size={14} />, name: 'Stochastic RSI', desc: 'RSI-of-RSI for overbought/oversold bounce detection' },
-    { icon: <Target size={14} />, name: 'Fibonacci + Pivots', desc: 'Standard pivot points + Fib retracement confluence' },
-    { icon: <Bot size={14} />, name: 'AI + Human Verification', desc: 'AI generates signal, senior TA team verifies (~80% verified)' },
-    { icon: <TrendingUp size={14} />, name: 'Buy Type Classifier', desc: 'Breakout Buy vs Retracement Buy detection' }
+    { icon: <Layers size={14} />, name: 'Advanced Price Action', desc: '60-day Support/Resistance, Demand/Supply zones, Bollinger Bands, EMA10/20/50/200 trend structure' },
+    { icon: <Layers size={14} />, name: 'Smart Money Concept (Full)', desc: 'Order Blocks, Fair Value Gaps (FVG), BOS, CHoCH, Liquidity Sweeps, Premium/Discount zones' },
+    { icon: <BarChart3 size={14} />, name: 'Volume Analysis', desc: 'Volume confirmation vs 20-day average for conviction' },
+    { icon: <Activity size={14} />, name: 'MACD', desc: '12/26 EMA crossover with 9-period signal + histogram slope' },
+    { icon: <TrendingUp size={14} />, name: 'Stochastic RSI', desc: 'RSI-of-RSI for overbought/oversold bounce detection (Merolagani verification indicator)' },
+    { icon: <Target size={14} />, name: 'Fibonacci + Pivots', desc: 'Standard pivot points + Fib retracement confluence (61.8% / 38.2%)' },
+    { icon: <Activity size={14} />, name: 'Candlestick Patterns', desc: 'Pin bar (hammer/shooting star), Bullish/Bearish Engulfing, Doji at key zones' },
+    { icon: <TrendingUp size={14} />, name: 'Buy Type Classifier', desc: 'Breakout Buy vs Retracement Buy detection (per Merolagani FAQ)' },
+    { icon: <Bot size={14} />, name: 'AI + Human Verification', desc: 'AI generates signal, senior TA team verifies (~80% verified, 15+ years experience)' }
   ];
   return (
     <div className="prescan">
       <div className="prescan-hero">
         <div className="prescan-icon"><Sparkles size={32} /></div>
         <h2>AI Charts — Full NEPSE Market Scan</h2>
-        <p>Scan all <strong>{totalStocks} listed NEPSE stocks</strong> using Merolagani's official data feed and apply the complete Merolagani AI Charts methodology: Advanced Price Action + Smart Money Concept + Volume + MACD + Stochastic RSI, then verified by senior TA team.</p>
+        <p>Scan all <strong>{totalStocks} listed NEPSE stocks</strong> using Merolagani's official data feed (~1.5 years history per stock) and apply the complete Merolagani AI Charts methodology: Advanced Price Action + Smart Money Concept (FVG, BOS, CHoCH, Liquidity Sweeps, Premium/Discount) + Volume + MACD + Stochastic RSI, then verified by senior TA team.</p>
         <button onClick={onScan} className="scan-cta-btn">
           <Search size={18} /> SCAN ALL {totalStocks} NEPSE STOCKS
         </button>
         <div className="prescan-note">
-          <Database size={11} /> Data source: <code>merolagani.com/handlers/webrequesthandler.ashx</code> (official Merolagani chart data API)
+          <Database size={11} /> Data source: <code>merolagani.com/handlers/webrequesthandler.ashx?dateRange=20</code> (official Merolagani chart data API, ~376 days history)
         </div>
       </div>
 
@@ -957,7 +1302,7 @@ export default function AICharts() {
           {list.length > 0 && (
             <div className="ac-footer">
               <span>Click any row for chart, SMC zones & strategy details · {totalSignals} total signals</span>
-              <span>TA Tools: EMA, RSI, Stoch RSI, MACD, BB, ATR, SMC Order Blocks, Fibonacci, Pivot Points, Volume</span>
+              <span>TA Tools: EMA10/20/50/200, RSI, Stoch RSI, MACD, BB, ATR, SMC (OB+FVG+BOS+CHoCH+Sweeps+Prem/Disc), Fib, Pivots, Patterns, Volume</span>
             </div>
           )}
         </>
