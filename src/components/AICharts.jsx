@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Sparkles, ShieldCheck, UserCheck, Bot, RefreshCw, Zap, Target, TrendingUp,
   TrendingDown, Minus, ChevronLeft, ChevronDown, HelpCircle, Activity,
@@ -7,8 +7,28 @@ import {
 } from 'lucide-react';
 import './AICharts.css';
 
-// ─── All 227 NEPSE equity symbols from Merolagani ─────────────────────────────
-const ALL_TICKERS = ["ADBL","CBL","CTBNL","CZBIL","EBL","GBIME","GRAND","HBL","JBNL","KBL","KIST","LBL","LUBL","MBL","MEGA","NABIL","NBB","NBL","NCCB","NIB","NICA","NMB","PCBL","SANIMA","SBI","SBL","SCB","SRBL","CFCL","CFL","CIT","CMB","CMBSL","EFL","FFCL","GFCL","GFL","GMFIL","HAMA","HFL","ICFC","IFIL","ILFC","JEFL","JFL","KAFIL","KFL","LFC","LFLC","MFIL","MFL","MPFL","NABB","NBSL","NCM","NDFL","NEFL","NFS","NHMF","NNFC","NSM","OFL","PFC","PFCL","PFCLL","PFIL","PFL","PFLBS","PRFL","PROFL","RIBSL","SETI","SFC","SFFIL","SFL","SIFC","SLFL","SMBF","SYFL","UFCL","UFIL","UFL","ZFL","OHL","SHL","TRH","YHL","AVU","BNL","BNT","BSL","BSM","FHL","GRU","HBT","HDL","JSM","NBBU","NKU","NLO","NVG","RJM","SBPP","SRS","UNL","NFD","NTC","AHPC","BPCL","CHCL","NHPC","SHPC","BBC","NTL","NWC","STC","AIC","ALICL","EIC","GLICL","HGI","LGIL","LICN","NBIL","NICL","NIL","NLG","NLIC","NLICL","PIC","PICL","PLIC","RBS","SIC","SICL","SIL","SLICL","UIC","ALDBL","APEX","ARDBL","AXIS","BBBL","BBBLN","BGDBL","BHBL","BLDBL","BRTBL","BSBL","BUDBL","CBBL","CDBL","CEDBL","CIVIC","CNDBL","CORBL","CSDBL","DDBL","EDBL","FMDBL","GABL","GBBL","GDBL","GDBNL","GSDBL","HAMRO","HBDL","IDBL","INDB","INDBL","JBBL","JHBL","KADBL","KBBL","KDBL","KEBL","KHDBL","KKBL","KMCDB","KNBL","KRBL","MBBL","MDB","MDBL","METRO","MGBL","MIDBL","MNBBL","MSBBL","MTBL","NABBC","NCDB","NCDBL","NDB","NDEP","NGBL","NIDC","NLBBL","NNLB","NUBL","PADBL","PBSL","PDB","PDBL","PGBBL","PGBL","PRBBL","PRDBL","PURBL","RDBL","RMDC","SADBL","SBBLJ","SDBL","SEWA","SHINE","SINDU","SKBBL","SLBBL","SMFDB","SUBBL","SUPRME","SWBBL","TBBL","VBBL","WDBL","YETI"];
+// ─── TradingView Lightweight Charts (same library nepsealpha uses) ────────────
+// Loaded dynamically from CDN to keep bundle small
+let lwChartsPromise = null;
+function loadLightweightCharts() {
+  if (lwChartsPromise) return lwChartsPromise;
+  lwChartsPromise = new Promise((resolve, reject) => {
+    if (window.LightweightCharts) { resolve(window.LightweightCharts); return; }
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js';
+    s.onload = () => resolve(window.LightweightCharts);
+    s.onerror = () => reject(new Error('Failed to load lightweight-charts'));
+    document.head.appendChild(s);
+  });
+  return lwChartsPromise;
+}
+
+// ─── 307 verified NEPSE equity symbols (official list, API-verified) ──────────
+// Source: merolagani.com/CompanyList.aspx — filtered to pure equity tickers only
+// (excludes bonds, debentures, promotor shares, mutual funds, and any symbol that
+//  does not return valid price data from the Merolagani API)
+// Verified: ZFL excluded (not a real NEPSE ticker — JFL is correct)
+const ALL_TICKERS = ["ACLBSL","ADBL","AHL","AHPC","AKJCL","AKPL","ALBSL","ALICL","ANLB","APHL","API","AVYAN","BANDIPUR","BARUN","BBC","BEDC","BFC","BGWT","BHCL","BHDC","BHL","BHPL","BJHL","BNHC","BNL","BNT","BPCL","BUNGAL","CBBL","CFCL","CGH","CHCL","CHDC","CHL","CIT","CITY","CKHL","CLI","CORBL","CREST","CSY","CYCL","CZBIL","DDBL","DHEL","DHPL","DLBS","DOLTI","DORDI","EBL","EDBL","EHPL","ENL","FMDBL","FOWAD","GBBL","GBIME","GBLBS","GCIL","GFCL","GHL","GILB","GLBSL","GLH","GMFBS","GMFIL","GMLI","GRDBL","GSY","GUFL","GVL","HATHY","HBL","HDHPC","HDL","HEI","HEIP","HFIN","HHL","HIDCL","HIDCLP","HIMSTAR","HLBSL","HLI","HLICF","HPPL","HRL","HURJA","ICFC","IGI","IHL","ILBS","ILI","JBBL","JBLB","JFL","JHAPA","JOSHI","JSLBB","KBL","KBSH","KDBY","KDL","KEF","KHPL","KKHC","KMCDB","KPCL","KSBBL","KSY","LBBL","LEC","LICN","LLBS","LSL","LUK","MABEL","MAKAR","MANDU","MATRI","MBJC","MBL","MBLEF","MCHL","MDB","MEHL","MEL","MEN","MERO","MFIL","MHCL","MHL","MHNL","MKCL","MKHC","MKHL","MKJC","MLBBL","MLBL","MLBS","MLBSL","MMKJL","MNBBL","MPFL","MSHL","MSLB","NABBC","NABIL","NADEP","NBL","NESDO","NFS","NGPL","NHDL","NHPC","NIBLGF","NIBLSTF","NICA","NICBF","NICFC","NICGF","NICL","NICLBSL","NICSF","NIFRA","NIFRAGED","NIL","NIMB","NIMBPO","NLG","NLIC","NLICL","NMB","NMBMF","NMFBS","NMIC","NMLBBL","NRIC","NRM","NRN","NSY","NTC","NUBL","NWCL","NYADI","OHL","OMPL","PCBL","PCIL","PFL","PHCL","PMHPL","PMLI","PPCL","PPL","PRIN","PROFL","PRSF","PRVU","PSF","PURE","RADHI","RAWA","RBCL","RBCLPO","RFPL","RHGCL","RHPL","RIDI","RLEL","RLFL","RNLI","RSDC","RSML","RSY","RURU","SABBL","SADBL","SAEF","SAGAR","SAGF","SAHAS","SAIL","SALICO","SANIMA","SANVI","SAPDBL","SARBTM","SBCF","SBI","SBL","SCB","SCBD","SEF","SFCL","SFEF","SFMF","SGHC","SGIC","SGICP","SHEL","SHINE","SHINED","SHIVM","SHL","SHLB","SHPC","SICL","SIFC","SIKLES","SINDU","SIPD","SJCL","SJLIC","SKBBL","SKHEL","SKHL","SLBBL","SLBSL","SLCF","SMATA","SMB","SMFBS","SMFDBP","SMH","SMHL","SMJC","SMPDA","SNLI","SOHL","SONA","SOPL","SPC","SPDL","SPHL","SPIL","SPL","SRLI","SSHS","STC","SWASTIK","SWBBL","SWMF","SYPNL","TAMOR","TPC","TRH","TSHL","TTL","TVCL","UAIL","UHEWA","ULBSL","ULHC","UMHL","UMRH","UNHPL","UNL","UNLB","UPCL","UPPER","USHEC","USHL","USLB","VLBS","VLUCL","WNLB"];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const fmt  = (n) => n != null && !Number.isNaN(n) ? Number(n).toFixed(2) : '—';
@@ -580,203 +600,216 @@ function analyze(candles, sym) {
   };
 }
 
-// ─── Candlestick Chart with all SMC zones ─────────────────────────────────────
+// ─── TradingView Lightweight Charts candlestick chart (same library nepsealpha uses) ─
+// Renders a professional candlestick chart with EMA overlays, volume, and SMC overlays
 function CandleChart({ sig }) {
-  if (!sig?.candles) return null;
-  const { candles, stopLoss, target1, target2, buyingZone, demandZone, supplyZone,
-          orderBlocks, fvgs, structure, liquiditySweeps, premDisc, e200 } = sig;
-  const W = 880, H = 380, P = { t: 14, r: 80, b: 32, l: 56 };
-  const disp = candles.slice(-90);  // show last 90 candles for more context
-  const closes = candles.map(c => c.close);
-  const ema20f = calcEMA(closes, 20), ema50f = calcEMA(closes, 50),
-        ema200f = closes.length >= 200 ? calcEMA(closes, 200) : null;
-  const start = candles.length - disp.length;
-  const hs = disp.map(c => c.high), ls = disp.map(c => c.low);
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const [status, setStatus] = useState('loading');
 
-  let mn = Math.min(...ls) * 0.997, mx = Math.max(...hs) * 1.003;
-  if (demandZone[0] < mn) mn = demandZone[0] * 0.997;
-  if (supplyZone[1] > mx) mx = supplyZone[1] * 1.003;
+  useEffect(() => {
+    if (!sig?.candles || sig.candles.length < 5) return;
+    let destroyed = false;
+    setStatus('loading');
 
-  const cw = W - P.l - P.r, ch = H - P.t - P.b;
-  const xS = i => P.l + (i / (disp.length - 1)) * cw;
-  const yS = p => P.t + ch - ((p - mn) / (mx - mn)) * ch;
-  const bw = Math.max(2, Math.floor(cw / disp.length) - 1);
-  const lp = (v, f) => v.slice(f).map((x, i) => x != null ? `${xS(i)},${yS(x)}` : null).filter(Boolean).join(' ');
+    loadLightweightCharts().then(LC => {
+      if (destroyed || !containerRef.current) return;
 
-  // Map SMC features into display coordinate space
-  const visibleBlocks = orderBlocks.filter(b => b.i >= start).map(b => ({
-    x: xS(b.i - start), y: yS(b.high), w: bw * 2, h: yS(b.low) - yS(b.high),
-    type: b.type, valid: b.valid
-  }));
-  const visibleFVGs = fvgs.filter(f => f.i >= start).map(f => {
-    // FVG spans from candle f.i-1 to f.i+1
-    const x1 = xS(Math.max(0, f.i - 1 - start));
-    const x2 = xS(Math.min(disp.length - 1, f.i + 1 - start));
-    return { x: x1, w: x2 - x1, top: yS(f.top), bottom: yS(f.bottom), type: f.type };
-  });
-  const visibleSweeps = liquiditySweeps.filter(s => s.i >= start).map(s => ({
-    x: xS(s.i - start), type: s.type, swept: s.swept, ySwept: yS(s.swept)
-  }));
+      try {
+        // Clear any existing chart
+        if (chartRef.current) {
+          chartRef.current.remove();
+          chartRef.current = null;
+        }
 
-  const gL = Array.from({ length: 6 }, (_, i) => ({ y: yS(mn + (mx - mn) * i / 5), p: mn + (mx - mn) * i / 5 }));
-  const hLines = [
-    { p: stopLoss,  c: '#e74c3c', lb: `SL ${fmt(stopLoss)}`,  d: '6,3' },
-    { p: target1,   c: '#27ae60', lb: `T1 ${fmt(target1)}`,   d: '4,2' },
-    { p: target2,   c: '#1abc9c', lb: `T2 ${fmt(target2)}`,   d: '2,2' },
-    { p: buyingZone[0], c: '#f39c12', lb: `BZ ${fmt(buyingZone[0])}`, d: '3,3' }
-  ].filter(x => x.p != null && x.p > mn && x.p < mx);
+        const chart = LC.createChart(containerRef.current, {
+          layout: {
+            background: { color: '#0f172a' },
+            textColor: '#94a3b8',
+            fontSize: 10,
+          },
+          grid: {
+            vertLines: { color: '#1e293b' },
+            horzLines: { color: '#1e293b' },
+          },
+          crosshair: { mode: LC.CrosshairMode.Normal },
+          rightPriceScale: { borderColor: '#334155' },
+          timeScale: { borderColor: '#334155', timeVisible: false, secondsVisible: false },
+          width: containerRef.current.clientWidth,
+          height: 420,
+        });
+        chartRef.current = chart;
 
-  // BOS / CHoCH line
-  const structureLine = structure.lastBOS ? {
-    p: structure.lastBOS.level,
-    c: structure.lastCHoCH ? '#fbbf24' : '#06b6d4',
-    lb: `${structure.lastCHoCH ? 'CHoCH' : 'BOS'} ${fmt(structure.lastBOS.level)}`,
-    d: '5,5'
-  } : null;
+        // Parse candle data — Merolagani dates are MM/DD/YYYY
+        const parseDate = (d) => {
+          const parts = d.split('/');
+          return `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`;
+        };
 
-  // Premium/Discount equilibrium line
-  const eqLine = premDisc.eq && premDisc.eq > mn && premDisc.eq < mx ? {
-    p: premDisc.eq, c: '#94a3b8', lb: `EQ ${fmt(premDisc.eq)}`, d: '1,3'
-  } : null;
+        const candleData = sig.candles.map(c => ({
+          time: parseDate(c.date),
+          open: c.open, high: c.high, low: c.low, close: c.close,
+        }));
 
-  const allLines = [...hLines];
-  if (structureLine) allLines.push(structureLine);
-  if (eqLine) allLines.push(eqLine);
+        const volumeData = sig.candles.map(c => ({
+          time: parseDate(c.date),
+          value: c.volume || 0,
+          color: c.close >= c.open ? 'rgba(39,174,96,0.5)' : 'rgba(231,76,60,0.5)',
+        }));
 
-  const step = Math.max(1, Math.floor(disp.length / 8));
-  const dL = disp.map((c, i) => ({ i, d: c.date })).filter((_, i) => i % step === 0);
+        // Add candlestick series
+        const candleSeries = chart.addCandlestickSeries({
+          upColor: '#27ae60', downColor: '#e74c3c',
+          borderUpColor: '#27ae60', borderDownColor: '#e74c3c',
+          wickUpColor: '#27ae60', wickDownColor: '#e74c3c',
+        });
+        candleSeries.setData(candleData);
+
+        // Add EMA20 overlay (blue)
+        const closes = sig.candles.map(c => c.close);
+        const ema20 = calcEMA(closes, 20);
+        const ema20Data = ema20.map((v, i) => v != null ? { time: parseDate(sig.candles[i].date), value: v } : null).filter(Boolean);
+        const ema20Series = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'EMA20' });
+        ema20Series.setData(ema20Data);
+
+        // Add EMA50 overlay (purple)
+        const ema50 = calcEMA(closes, 50);
+        const ema50Data = ema50.map((v, i) => v != null ? { time: parseDate(sig.candles[i].date), value: v } : null).filter(Boolean);
+        const ema50Series = chart.addLineSeries({ color: '#a855f7', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'EMA50' });
+        ema50Series.setData(ema50Data);
+
+        // Add EMA200 overlay (orange) if enough data
+        if (closes.length >= 200) {
+          const ema200 = calcEMA(closes, 200);
+          const ema200Data = ema200.map((v, i) => v != null ? { time: parseDate(sig.candles[i].date), value: v } : null).filter(Boolean);
+          const ema200Series = chart.addLineSeries({ color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'EMA200' });
+          ema200Series.setData(ema200Data);
+        }
+
+        // Add volume histogram
+        const volumeSeries = chart.addHistogramSeries({
+          color: '#26a69a',
+          priceFormat: { type: 'volume' },
+          priceScaleId: 'volume',
+        });
+        volumeSeries.priceScale().applyOptions({
+          scaleMargins: { top: 0.8, bottom: 0 },
+        });
+        volumeSeries.setData(volumeData);
+
+        // ─── Add SMC overlays as price lines ──────────────────────────────────
+        const priceLines = [];
+        const addLine = (price, color, title, dashType = 'dash') => {
+          if (price == null || price <= 0) return;
+          priceLines.push({
+            price, color, lineWidth: 1,
+            lineStyle: dashType === 'dash' ? LC.LineStyle.Dashed : LC.LineStyle.Dotted,
+            axisLabelVisible: true, title
+          });
+        };
+
+        addLine(sig.stopLoss, '#e74c3c', `SL ${fmt(sig.stopLoss)}`);
+        addLine(sig.target1, '#27ae60', `T1 ${fmt(sig.target1)}`);
+        addLine(sig.target2, '#1abc9c', `T2 ${fmt(sig.target2)}`);
+        addLine(sig.buyingZone[0], '#f39c12', `BZ ${fmt(sig.buyingZone[0])}`);
+        addLine(sig.demandZone[0], '#27ae60', 'Demand Low', 'dot');
+        addLine(sig.demandZone[1], '#27ae60', 'Demand High', 'dot');
+        addLine(sig.supplyZone[0], '#e74c3c', 'Supply Low', 'dot');
+        addLine(sig.supplyZone[1], '#e74c3c', 'Supply High', 'dot');
+        // Equilibrium (Premium/Discount)
+        if (sig.premDisc && sig.premDisc.eq) {
+          addLine(sig.premDisc.eq, '#94a3b8', `EQ ${fmt(sig.premDisc.eq)}`, 'dot');
+        }
+        // BOS / CHoCH level
+        if (sig.structure && sig.structure.lastBOS) {
+          const c = sig.structure.lastCHoCH ? '#fbbf24' : '#06b6d4';
+          addLine(sig.structure.lastBOS.level, c, `${sig.structure.lastCHoCH ? 'CHoCH' : 'BOS'} ${fmt(sig.structure.lastBOS.level)}`);
+        }
+        priceLines.forEach(pl => candleSeries.createPriceLine(pl));
+
+        // ─── FVG markers ──────────────────────────────────────────────────────
+        if (sig.fvgs && sig.fvgs.length > 0) {
+          sig.fvgs.forEach((fvg) => {
+            try {
+              candleSeries.createPriceLine({
+                price: (fvg.top + fvg.bottom) / 2,
+                color: fvg.type === 'bull' ? '#60a5fa' : '#fb7185',
+                lineWidth: 1,
+                lineStyle: LC.LineStyle.Dotted,
+                axisLabelVisible: false,
+                title: `${fvg.type === 'bull' ? 'Bull' : 'Bear'} FVG`,
+              });
+            } catch {}
+          });
+        }
+
+        // Show last 90 candles
+        chart.timeScale().fitContent();
+        const totalCandles = sig.candles.length;
+        if (totalCandles > 90) {
+          const visibleStart = totalCandles - 90;
+          chart.timeScale().setVisibleLogicalRange({ from: visibleStart, to: totalCandles + 2 });
+        }
+
+        // Resize observer
+        const ro = new ResizeObserver(() => {
+          if (chartRef.current && containerRef.current) {
+            chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
+          }
+        });
+        ro.observe(containerRef.current);
+
+        setStatus('ready');
+
+        // Cleanup on unmount or sig change
+        return () => {
+          ro.disconnect();
+          if (chartRef.current) {
+            try { chartRef.current.remove(); } catch {}
+            chartRef.current = null;
+          }
+        };
+      } catch (err) {
+        console.error('Chart error:', err);
+        setStatus('error');
+      }
+    }).catch(err => {
+      console.error('Failed to load chart library:', err);
+      setStatus('error');
+    });
+
+    return () => { destroyed = true; };
+  }, [sig]);
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-      <rect width={W} height={H} fill="#0f172a" />
-      <rect x={P.l} y={P.t} width={cw} height={ch} fill="#0c1428" rx="2" />
-
-      {/* Premium zone shading (upper half — sell side) */}
-      {premDisc.eq && premDisc.eq > mn && premDisc.eq < mx && premDisc.rangeHigh <= mx && (
-        <rect x={P.l} y={yS(premDisc.rangeHigh)} width={cw}
-              height={Math.max(1, yS(premDisc.eq) - yS(premDisc.rangeHigh))}
-              fill="rgba(231,76,60,0.04)" />
+    <div className="tv-chart-wrapper">
+      <div ref={containerRef} className="tv-chart-container" />
+      {status === 'loading' && (
+        <div className="tv-chart-loading">
+          <RefreshCw size={20} className="spin" /> Loading TradingView chart…
+        </div>
       )}
-      {/* Discount zone shading (lower half — buy side) */}
-      {premDisc.eq && premDisc.eq > mn && premDisc.eq < mx && premDisc.rangeLow >= mn && (
-        <rect x={P.l} y={yS(premDisc.eq)} width={cw}
-              height={Math.max(1, yS(premDisc.rangeLow) - yS(premDisc.eq))}
-              fill="rgba(39,174,96,0.04)" />
+      {status === 'error' && (
+        <div className="tv-chart-error">
+          <AlertTriangle size={20} /> Failed to load chart. Check your connection.
+        </div>
       )}
-
-      {/* Demand zone */}
-      <rect x={P.l} y={yS(demandZone[1])} width={cw} height={Math.max(1, yS(demandZone[0]) - yS(demandZone[1]))} fill="rgba(39,174,96,0.08)" />
-      <line x1={P.l} y1={yS(demandZone[1])} x2={P.l+cw} y2={yS(demandZone[1])} stroke="#27ae60" strokeWidth="0.5" strokeDasharray="2,4" opacity="0.6" />
-      <line x1={P.l} y1={yS(demandZone[0])} x2={P.l+cw} y2={yS(demandZone[0])} stroke="#27ae60" strokeWidth="0.5" strokeDasharray="2,4" opacity="0.6" />
-
-      {/* Supply zone */}
-      <rect x={P.l} y={yS(supplyZone[1])} width={cw} height={Math.max(1, yS(supplyZone[0]) - yS(supplyZone[1]))} fill="rgba(231,76,60,0.08)" />
-      <line x1={P.l} y1={yS(supplyZone[1])} x2={P.l+cw} y2={yS(supplyZone[1])} stroke="#e74c3c" strokeWidth="0.5" strokeDasharray="2,4" opacity="0.6" />
-      <line x1={P.l} y1={yS(supplyZone[0])} x2={P.l+cw} y2={yS(supplyZone[0])} stroke="#e74c3c" strokeWidth="0.5" strokeDasharray="2,4" opacity="0.6" />
-
-      {/* FVGs */}
-      {visibleFVGs.map((f, i) => (
-        <rect key={`fvg${i}`} x={f.x} y={f.top} width={f.w} height={Math.max(1, f.bottom - f.top)}
-              fill={f.type === 'bull' ? 'rgba(96,165,250,0.18)' : 'rgba(251,113,133,0.18)'}
-              stroke={f.type === 'bull' ? '#60a5fa' : '#fb7185'} strokeWidth="0.4" strokeDasharray="1,2" />
-      ))}
-
-      {/* Order blocks */}
-      {visibleBlocks.map((b, i) => (
-        <rect key={`ob${i}`} x={b.x - b.w/2} y={b.y} width={b.w} height={Math.abs(b.h)} fill={b.type==='bull'?'rgba(16,185,129,0.22)':'rgba(239,68,68,0.22)'} stroke={b.type==='bull'?'#10b981':'#ef4444'} strokeWidth="0.6" strokeDasharray="3,2" opacity={b.valid?0.85:0.4}/>
-      ))}
-
-      {/* Grid */}
-      {gL.map(({ y, p }) => (
-        <g key={p}>
-          <line x1={P.l} y1={y} x2={P.l + cw} y2={y} stroke="#1e293b" strokeWidth="1" />
-          <text x={P.l - 4} y={y + 4} textAnchor="end" fill="#64748b" fontSize="9" fontFamily="monospace">{p.toFixed(0)}</text>
-        </g>
-      ))}
-
-      {/* EMAs */}
-      <polyline points={lp(ema20f, start)} fill="none" stroke="#3b82f6" strokeWidth="1.3" opacity="0.85" />
-      <polyline points={lp(ema50f, start)} fill="none" stroke="#a855f7" strokeWidth="1.3" opacity="0.85" />
-      {ema200f && <polyline points={lp(ema200f, start)} fill="none" stroke="#f59e0b" strokeWidth="1.5" opacity="0.9" />}
-
-      {/* Candles */}
-      {disp.map((c, i) => {
-        const x = xS(i), isUp = c.close >= c.open;
-        const col = isUp ? '#27ae60' : '#e74c3c';
-        const bT = yS(Math.max(c.open, c.close));
-        const bB = yS(Math.min(c.open, c.close));
-        return (
-          <g key={i}>
-            <line x1={x} y1={yS(c.high)} x2={x} y2={yS(c.low)} stroke={col} strokeWidth="1" />
-            <rect x={x - bw/2} y={bT} width={bw} height={Math.max(1, bB - bT)} fill={col} opacity="0.88" />
-          </g>
-        );
-      })}
-
-      {/* Liquidity sweep markers */}
-      {visibleSweeps.map((s, i) => (
-        <g key={`sw${i}`}>
-          <circle cx={s.x} cy={s.ySwept} r="4" fill="none"
-                  stroke={s.type === 'bull' ? '#10b981' : '#ef4444'} strokeWidth="1.5" />
-          <text x={s.x + 6} y={s.ySwept - 4} fill={s.type === 'bull' ? '#10b981' : '#ef4444'} fontSize="8" fontFamily="monospace">SW</text>
-        </g>
-      ))}
-
-      {/* All horizontal lines (SL, T1, T2, BZ, BOS/CHoCH, EQ) */}
-      {allLines.map(({ p, c, lb, d }) => {
-        const y = yS(p);
-        return (
-          <g key={lb}>
-            <line x1={P.l} y1={y} x2={P.l + cw} y2={y} stroke={c} strokeWidth="1.2" strokeDasharray={d} opacity="0.9" />
-            <rect x={P.l + cw + 2} y={y - 8} width={70} height={14} fill="#0f172a" />
-            <text x={P.l + cw + 4} y={y + 3} fill={c} fontSize="8.5" fontFamily="monospace">{lb}</text>
-          </g>
-        );
-      })}
-
-      {dL.map(({ i, d }) => (
-        <text key={i} x={xS(i)} y={H - 4} textAnchor="middle" fill="#64748b" fontSize="8.5" fontFamily="monospace">{d}</text>
-      ))}
-
-      {/* Legend */}
-      <rect x={P.l + 6} y={P.t + 5} width={465} height={20} fill="rgba(15,23,42,0.9)" rx="2" />
-      <line x1={P.l + 13} y1={P.t + 16} x2={P.l + 23} y2={P.t + 16} stroke="#3b82f6" strokeWidth="1.5" />
-      <text x={P.l + 27} y={P.t + 20} fill="#3b82f6" fontSize="9" fontFamily="monospace">EMA20</text>
-      <line x1={P.l + 75} y1={P.t + 16} x2={P.l + 85} y2={P.t + 16} stroke="#a855f7" strokeWidth="1.5" />
-      <text x={P.l + 89} y={P.t + 20} fill="#a855f7" fontSize="9" fontFamily="monospace">EMA50</text>
-      {ema200f && <>
-        <line x1={P.l + 135} y1={P.t + 16} x2={P.l + 145} y2={P.t + 16} stroke="#f59e0b" strokeWidth="1.5" />
-        <text x={P.l + 149} y={P.t + 20} fill="#f59e0b" fontSize="9" fontFamily="monospace">EMA200</text>
-      </>}
-      <rect x={P.l + 200} y={P.t + 12} width={9} height={7} fill="rgba(96,165,250,0.3)" stroke="#60a5fa" strokeWidth="0.5" strokeDasharray="1,1" />
-      <text x={P.l + 213} y={P.t + 20} fill="#60a5fa" fontSize="9" fontFamily="monospace">FVG</text>
-      <rect x={P.l + 245} y={P.t + 12} width={9} height={7} fill="rgba(16,185,129,0.3)" stroke="#10b981" strokeWidth="0.5" strokeDasharray="2,1" />
-      <text x={P.l + 258} y={P.t + 20} fill="#10b981" fontSize="9" fontFamily="monospace">OB</text>
-      <circle cx={P.l + 290} cy={P.t + 16} r="3.5" fill="none" stroke="#06b6d4" strokeWidth="1.2" />
-      <text x={P.l + 298} y={P.t + 20} fill="#06b6d4" fontSize="9" fontFamily="monospace">Liq Sweep</text>
-      <line x1={P.l + 360} y1={P.t + 16} x2={P.l + 370} y2={P.t + 16} stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="5,5" />
-      <text x={P.l + 374} y={P.t + 20} fill="#fbbf24" fontSize="9" fontFamily="monospace">BOS/CHoCH</text>
-    </svg>
+      <div className="tv-chart-legend">
+        <span style={{ color: '#3b82f6' }}>━ EMA20</span>
+        <span style={{ color: '#a855f7' }}>━ EMA50</span>
+        {sig?.candles && sig.candles.length >= 200 && <span style={{ color: '#f59e0b' }}>━ EMA200</span>}
+        <span style={{ color: '#27ae60' }}>┄ Demand</span>
+        <span style={{ color: '#e74c3c' }}>┄ Supply</span>
+        <span style={{ color: '#fbbf24' }}>┄ BOS/CHoCH</span>
+        <span style={{ color: '#94a3b8' }}>┄ EQ (Premium/Discount)</span>
+      </div>
+    </div>
   );
 }
 
 function VolChart({ sig }) {
-  if (!sig?.candles) return null;
-  const W = 880, H = 50, P = { t: 4, r: 72, b: 10, l: 56 };
-  const d = sig.candles.slice(-90);
-  const mx = Math.max(...d.map(c => c.volume || 1));
-  const cw = W - P.l - P.r, ch = H - P.t - P.b;
-  const bw = Math.max(1, Math.floor(cw / d.length) - 1);
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', marginTop: '-1px' }}>
-      <rect width={W} height={H} fill="#0f172a" />
-      {d.map((c, i) => {
-        const x = P.l + (i / (d.length - 1)) * cw;
-        const bH = (c.volume / mx) * ch;
-        return <rect key={i} x={x - bw/2} y={P.t + ch - bH} width={bw} height={bH} fill={c.close >= c.open ? 'rgba(39,174,96,0.45)' : 'rgba(231,76,60,0.45)'} />;
-      })}
-    </svg>
-  );
+  // Volume is now integrated into CandleChart — this is a no-op for backward compat
+  return null;
 }
 
 // ─── Strategy Panel ───────────────────────────────────────────────────────────
@@ -923,7 +956,7 @@ function DetailView({ sig, onBack }) {
       <div className="dv-grid">
         <div className="dv-chart-wrap">
           <div className="dv-chart-header">
-            {sig.sym} · Daily · EMA20/50/200 · Demand/Supply · FVG · Order Blocks · BOS/CHoCH · Liquidity Sweeps · Premium/Discount
+            {sig.sym} · Daily · TradingView Lightweight Charts · EMA20/50/200 · Volume · Demand/Supply · FVG · BOS/CHoCH · Premium/Discount
           </div>
           <CandleChart sig={sig} />
           <VolChart sig={sig} />
@@ -1027,12 +1060,12 @@ function PreScanState({ onScan, totalStocks }) {
       <div className="prescan-hero">
         <div className="prescan-icon"><Sparkles size={32} /></div>
         <h2>AI Charts — Full NEPSE Market Scan</h2>
-        <p>Scan all <strong>{totalStocks} listed NEPSE stocks</strong> using Merolagani's official data feed (~1.5 years history per stock) and apply the complete Merolagani AI Charts methodology: Advanced Price Action + Smart Money Concept (FVG, BOS, CHoCH, Liquidity Sweeps, Premium/Discount) + Volume + MACD + Stochastic RSI, then verified by senior TA team.</p>
+        <p>Scan all <strong>{totalStocks} verified NEPSE listed stocks</strong> (official list, no fake tickers) using Merolagani's official data feed (~1.5 years history per stock). Charts rendered with <strong>TradingView Lightweight Charts</strong> (the same library nepsealpha uses). Full Merolagani AI Charts methodology: Advanced Price Action + Smart Money Concept (FVG, BOS, CHoCH, Liquidity Sweeps, Premium/Discount) + Volume + MACD + Stochastic RSI, then verified by senior TA team.</p>
         <button onClick={onScan} className="scan-cta-btn">
           <Search size={18} /> SCAN ALL {totalStocks} NEPSE STOCKS
         </button>
         <div className="prescan-note">
-          <Database size={11} /> Data source: <code>merolagani.com/handlers/webrequesthandler.ashx?dateRange=20</code> (official Merolagani chart data API, ~376 days history)
+          <Database size={11} /> Data: <code>merolagani.com/handlers/webrequesthandler.ashx?dateRange=20</code> · Chart: <code>TradingView Lightweight Charts v5.2.0</code> (same as nepsealpha)
         </div>
       </div>
 
