@@ -3,7 +3,7 @@ import {
   Sparkles, ShieldCheck, UserCheck, Bot, RefreshCw, Zap, Target, TrendingUp,
   TrendingDown, Minus, ChevronLeft, ChevronDown, HelpCircle, Activity,
   Flame, ArrowDownRight, Layers, Award, AlertTriangle, Clock, Search,
-  BarChart3, Database, CheckCircle2, XCircle, Play
+  BarChart3, Database, CheckCircle2, XCircle, Play, ExternalLink
 } from 'lucide-react';
 import './AICharts.css';
 
@@ -38,20 +38,29 @@ const fmtK = (n) => n > 1e6 ? (n/1e6).toFixed(1)+'M' : n > 1e3 ? (n/1e3).toFixed
 // This is the same endpoint Merolagani uses internally for its charts/AI products.
 // dateRange=20 returns ~376 trading days (~1.5 years), enough for EMA200 approximation,
 // real swing high/low structure, and proper Smart Money Concept analysis.
-async function fetchMerolagani(sym) {
-  try {
-    const res = await fetch(
-      `https://merolagani.com/handlers/webrequesthandler.ashx?type=get_company_graph&symbol=${sym}&dateRange=20`,
-      { mode: 'cors' }
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.quotes || data.quotes.length < 50) return null;
-    return data.quotes.map(q => ({
-      date: q.date, open: q.open, high: q.high, low: q.low,
-      close: q.close, volume: q.volume || 0
-    }));
-  } catch { return null; }
+async function fetchMerolagani(sym, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(
+        `https://merolagani.com/handlers/webrequesthandler.ashx?type=get_company_graph&symbol=${sym}&dateRange=20`,
+        { mode: 'cors' }
+      );
+      if (!res.ok) { if (attempt < retries) { await new Promise(r => setTimeout(r, 200 * (attempt + 1))); continue; } return null; }
+      const data = await res.json();
+      if (!data.quotes || data.quotes.length < 20) {
+        if (attempt < retries) { await new Promise(r => setTimeout(r, 200 * (attempt + 1))); continue; }
+        return null;
+      }
+      return data.quotes.map(q => ({
+        date: q.date, open: q.open, high: q.high, low: q.low,
+        close: q.close, volume: q.volume || 0
+      }));
+    } catch {
+      if (attempt < retries) { await new Promise(r => setTimeout(r, 200 * (attempt + 1))); continue; }
+      return null;
+    }
+  }
+  return null;
 }
 
 // ─── Indicators (full TA toolset as Merolagani states) ────────────────────────
@@ -399,7 +408,7 @@ function simulateVerification(sig) {
 
 // ─── Main analyzer — full Merolagani TA toolset ───────────────────────────────
 function analyze(candles, sym) {
-  if (!candles || candles.length < 50) return null;
+  if (!candles || candles.length < 20) return null;
   const C = candles.map(c => c.close), H = candles.map(c => c.high),
         L = candles.map(c => c.low),   V = candles.map(c => c.volume || 0);
   const n = candles.length - 1;
@@ -657,8 +666,8 @@ function CandleChart({ sig }) {
           color: c.close >= c.open ? 'rgba(39,174,96,0.5)' : 'rgba(231,76,60,0.5)',
         }));
 
-        // Add candlestick series
-        const candleSeries = chart.addCandlestickSeries({
+        // Add candlestick series — v5 API: chart.addSeries(SeriesType, options)
+        const candleSeries = chart.addSeries(LC.CandlestickSeries, {
           upColor: '#27ae60', downColor: '#e74c3c',
           borderUpColor: '#27ae60', borderDownColor: '#e74c3c',
           wickUpColor: '#27ae60', wickDownColor: '#e74c3c',
@@ -669,25 +678,25 @@ function CandleChart({ sig }) {
         const closes = sig.candles.map(c => c.close);
         const ema20 = calcEMA(closes, 20);
         const ema20Data = ema20.map((v, i) => v != null ? { time: parseDate(sig.candles[i].date), value: v } : null).filter(Boolean);
-        const ema20Series = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'EMA20' });
+        const ema20Series = chart.addSeries(LC.LineSeries, { color: '#3b82f6', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'EMA20' });
         ema20Series.setData(ema20Data);
 
         // Add EMA50 overlay (purple)
         const ema50 = calcEMA(closes, 50);
         const ema50Data = ema50.map((v, i) => v != null ? { time: parseDate(sig.candles[i].date), value: v } : null).filter(Boolean);
-        const ema50Series = chart.addLineSeries({ color: '#a855f7', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'EMA50' });
+        const ema50Series = chart.addSeries(LC.LineSeries, { color: '#a855f7', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'EMA50' });
         ema50Series.setData(ema50Data);
 
         // Add EMA200 overlay (orange) if enough data
         if (closes.length >= 200) {
           const ema200 = calcEMA(closes, 200);
           const ema200Data = ema200.map((v, i) => v != null ? { time: parseDate(sig.candles[i].date), value: v } : null).filter(Boolean);
-          const ema200Series = chart.addLineSeries({ color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'EMA200' });
+          const ema200Series = chart.addSeries(LC.LineSeries, { color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'EMA200' });
           ema200Series.setData(ema200Data);
         }
 
-        // Add volume histogram
-        const volumeSeries = chart.addHistogramSeries({
+        // Add volume histogram — v5 API
+        const volumeSeries = chart.addSeries(LC.HistogramSeries, {
           color: '#26a69a',
           priceFormat: { type: 'volume' },
           priceScaleId: 'volume',
@@ -726,6 +735,57 @@ function CandleChart({ sig }) {
           addLine(sig.structure.lastBOS.level, c, `${sig.structure.lastCHoCH ? 'CHoCH' : 'BOS'} ${fmt(sig.structure.lastBOS.level)}`);
         }
         priceLines.forEach(pl => candleSeries.createPriceLine(pl));
+
+        // ─── Shaded BUYING/SELLING ZONES via stacked area series ───────────────
+        // Approach: use baseline series for clear visualization of the zone bands
+        // Buying zone (green band) - shown only for BUY signals
+        if (sig.action === 'BUY' && sig.buyingZone && sig.buyingZone[0] > 0 && sig.buyingZone[1] > 0) {
+          try {
+            const zData = sig.candles.slice(-120).map(c => ({
+              time: parseDate(c.date),
+              value: sig.buyingZone[1], // top of buying zone
+            }));
+            // Baseline series with baseValue at buyingZone[0] creates a filled band
+            const buyBand = chart.addSeries(LC.BaselineSeries, {
+              topLineColor: 'rgba(39, 174, 96, 0.9)',
+              topFillColor1: 'rgba(39, 174, 96, 0.35)',
+              topFillColor2: 'rgba(39, 174, 96, 0.15)',
+              bottomLineColor: 'rgba(39, 174, 96, 0.4)',
+              bottomFillColor1: 'rgba(39, 174, 96, 0.05)',
+              bottomFillColor2: 'rgba(39, 174, 96, 0.02)',
+              lineWidth: 1,
+              priceLineVisible: false,
+              lastValueVisible: false,
+              crosshairMarkerVisible: false,
+              baseValue: { type: 'price', price: sig.buyingZone[0] },
+            });
+            buyBand.setData(zData);
+          } catch (e) { console.warn('Buy zone render failed:', e); }
+        }
+
+        // Selling zone (red band) - shown only for SELL signals
+        if (sig.action === 'SELL' && sig.supplyZone && sig.supplyZone[0] > 0 && sig.supplyZone[1] > 0) {
+          try {
+            const zData = sig.candles.slice(-120).map(c => ({
+              time: parseDate(c.date),
+              value: sig.supplyZone[1],
+            }));
+            const sellBand = chart.addSeries(LC.BaselineSeries, {
+              topLineColor: 'rgba(231, 76, 60, 0.9)',
+              topFillColor1: 'rgba(231, 76, 60, 0.35)',
+              topFillColor2: 'rgba(231, 76, 60, 0.15)',
+              bottomLineColor: 'rgba(231, 76, 60, 0.4)',
+              bottomFillColor1: 'rgba(231, 76, 60, 0.05)',
+              bottomFillColor2: 'rgba(231, 76, 60, 0.02)',
+              lineWidth: 1,
+              priceLineVisible: false,
+              lastValueVisible: false,
+              crosshairMarkerVisible: false,
+              baseValue: { type: 'price', price: sig.supplyZone[0] },
+            });
+            sellBand.setData(zData);
+          } catch (e) { console.warn('Sell zone render failed:', e); }
+        }
 
         // ─── FVG markers ──────────────────────────────────────────────────────
         if (sig.fvgs && sig.fvgs.length > 0) {
@@ -798,10 +858,13 @@ function CandleChart({ sig }) {
         <span style={{ color: '#3b82f6' }}>━ EMA20</span>
         <span style={{ color: '#a855f7' }}>━ EMA50</span>
         {sig?.candles && sig.candles.length >= 200 && <span style={{ color: '#f59e0b' }}>━ EMA200</span>}
-        <span style={{ color: '#27ae60' }}>┄ Demand</span>
-        <span style={{ color: '#e74c3c' }}>┄ Supply</span>
-        <span style={{ color: '#fbbf24' }}>┄ BOS/CHoCH</span>
+        {sig?.action === 'BUY' && <span style={{ color: '#27ae60', background: 'rgba(39,174,96,0.25)', padding: '2px 6px', borderRadius: '2px' }}>🟩 BUYING ZONE (shaded green)</span>}
+        {sig?.action === 'SELL' && <span style={{ color: '#e74c3c', background: 'rgba(231,76,60,0.25)', padding: '2px 6px', borderRadius: '2px' }}>🟥 SELLING ZONE (shaded red)</span>}
+        <span style={{ color: '#e74c3c' }}>┄ SL (Stop Loss)</span>
+        <span style={{ color: '#27ae60' }}>┄ T1 / T2 (Targets)</span>
+        <span style={{ color: '#f39c12' }}>┄ BZ (Buying Zone)</span>
         <span style={{ color: '#94a3b8' }}>┄ EQ (Premium/Discount)</span>
+        <span style={{ color: '#fbbf24' }}>┄ BOS/CHoCH</span>
       </div>
     </div>
   );
@@ -951,12 +1014,77 @@ function DetailView({ sig, onBack }) {
         <div className="dv-meta">
           <Activity size={11} /> Live · Merolagani Official Data · {sig.candles.length} days
         </div>
+        <a
+          href={`https://nepsealpha.com/stocks/${sig.sym}/info`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="dv-open-na"
+          title="Open this stock on NepseAlpha (full interactive chart)"
+        >
+          <ExternalLink size={12} /> Open in NepseAlpha
+        </a>
+      </div>
+
+      {/* Action zone summary bar — clearly marks buying/selling/stop-loss zones */}
+      <div className="action-zone-bar">
+        {sig.action === 'BUY' && (
+          <>
+            <div className="az-section az-buy">
+              <div className="az-label">🟢 BUYING AREA</div>
+              <div className="az-value">Rs {fmt(sig.buyingZone[0])} – {fmt(sig.buyingZone[1])}</div>
+            </div>
+            <div className="az-section az-target">
+              <div className="az-label">🎯 TARGET 1 / TARGET 2</div>
+              <div className="az-value">Rs {fmt(sig.target1)} / Rs {fmt(sig.target2)}</div>
+            </div>
+            <div className="az-section az-sl">
+              <div className="az-label">🛑 STOP LOSS (close below)</div>
+              <div className="az-value">Rs {fmt(sig.stopLoss)}</div>
+            </div>
+            <div className="az-section az-rr">
+              <div className="az-label">⚖️ RISK : REWARD</div>
+              <div className="az-value">1 : {sig.rr ? sig.rr.toFixed(2) : '—'}</div>
+            </div>
+          </>
+        )}
+        {sig.action === 'SELL' && (
+          <>
+            <div className="az-section az-sell">
+              <div className="az-label">🔴 SELLING AREA</div>
+              <div className="az-value">Rs {fmt(sig.supplyZone[0])} – {fmt(sig.supplyZone[1])}</div>
+            </div>
+            <div className="az-section az-target">
+              <div className="az-label">🎯 TARGET 1 / TARGET 2</div>
+              <div className="az-value">Rs {fmt(sig.target1)} / Rs {fmt(sig.target2)}</div>
+            </div>
+            <div className="az-section az-sl">
+              <div className="az-label">🛑 STOP LOSS (close above)</div>
+              <div className="az-value">Rs {fmt(sig.stopLoss)}</div>
+            </div>
+            <div className="az-section az-rr">
+              <div className="az-label">⚖️ RISK : REWARD</div>
+              <div className="az-value">1 : {sig.rr ? sig.rr.toFixed(2) : '—'}</div>
+            </div>
+          </>
+        )}
+        {sig.action === 'HOLD' && (
+          <>
+            <div className="az-section az-hold">
+              <div className="az-label">🟡 HOLD — RANGE</div>
+              <div className="az-value">Rs {fmt(sig.support)} – {fmt(sig.resistance)}</div>
+            </div>
+            <div className="az-section az-target">
+              <div className="az-label">🎯 WATCH LEVELS</div>
+              <div className="az-value">Break Rs {fmt(sig.resistance)} → BUY / Break Rs {fmt(sig.support)} → SELL</div>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="dv-grid">
         <div className="dv-chart-wrap">
           <div className="dv-chart-header">
-            {sig.sym} · Daily · TradingView Lightweight Charts · EMA20/50/200 · Volume · Demand/Supply · FVG · BOS/CHoCH · Premium/Discount
+            {sig.sym} · Daily · TradingView Lightweight Charts (same as NepseAlpha) · EMA20/50/200 · Volume · Shaded Buy/Sell Zones · Stop Loss · Demand/Supply · BOS/CHoCH
           </div>
           <CandleChart sig={sig} />
           <VolChart sig={sig} />
@@ -1142,8 +1270,8 @@ export default function AICharts() {
     const out = { BUY: [], SELL: [], HOLD: [] };
     let failed = 0;
     // Batch of 10 for speed (10 parallel fetches)
-    for (let i = 0; i < ALL_TICKERS.length; i += 10) {
-      const batch = ALL_TICKERS.slice(i, i + 10);
+    for (let i = 0; i < ALL_TICKERS.length; i += 5) {
+      const batch = ALL_TICKERS.slice(i, i + 5);
       setProg(p => ({ ...p, sym: batch[0] }));
       const fetched = await Promise.all(batch.map(sym => fetchMerolagani(sym).then(c => ({ sym, c }))));
       for (const { sym, c } of fetched) {
