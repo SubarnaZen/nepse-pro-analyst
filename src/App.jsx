@@ -11,6 +11,7 @@ import IPOTracker from './components/IPOTracker';
 import PortfolioTracker from './components/PortfolioTracker';
 import Alerts from './components/Alerts';
 import ZenChart from './components/ZenChart';
+import AICharts from './components/AICharts';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -47,6 +48,8 @@ function App() {
         );
       case 'zenchart':
         return <ZenChart initialTicker={selectedTicker || 'NABIL'} />;
+      case 'aicharts':
+        return <AICharts />;
       case 'screener':
         return <Screener onSelectTicker={setSelectedTicker} setActiveTab={setActiveTab} />;
       case 'news':

@@ -11,12 +11,14 @@ import {
   Settings, 
   History,
   Menu,
-  Zap
+  Zap,
+  Sparkles
 } from 'lucide-react';
 import './LeftSidebar.css';
 
 const navItems = [
   { id: 'dashboard',  label: 'Dashboard',       icon: LayoutDashboard },
+  { id: 'aicharts',   label: 'AI Charts ✨',    icon: Sparkles },
   { id: 'zenchart',   label: 'ZenChart ⚡',     icon: Zap },
   { id: 'watchlist',  label: 'Watchlist',        icon: Star },
   { id: 'screener',   label: 'Stock Screener',   icon: Search },
